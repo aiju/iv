@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>IV</title>
+<script src="arith.js" type="text/javascript"></script>
+<script src="parse.js" type="text/javascript"></script>
+<script src="ast.js" type="text/javascript"></script>
+<style type="text/css">
+@font-face {
+    font-family: 'vgamedium';
+    src: url('vgamedium-webfont.woff2') format('woff2'),
+         url('vgamedium-webfont.woff') format('woff');
+    font-weight: normal;
+    font-style: normal;
+}
+* {
+	font-family: 'vgamedium', monospace;
+}
+body {
+	display: flex;
+	background: #777777;
+}
+#code {
+	height: 50em;
+	width: 50%;
+	font-size: 12pt;
+	background-color: #ffffe9;
+	border: 4px solid #55aaaa;
+	outline: none;
+	
+}
+#code::-webkit-scrollbar {
+	width: 12px;
+}
+#code::-webkit-scrollbar-track {
+	background-color: #99994c;
+}
+#code::-webkit-scrollbar-thumb {
+	background-color: #ffffe9;
+	border: 1px solid #99994c;
+}
+#code::-webkit-resizer {
+	display: none;
+}
+#code::selection {
+	background: rgba(238, 238, 158, 0.99);
+}
+#out {
+	border: 4px solid #55aaaa;
+	margin-left: 5px;
+	padding: 5px;
+	width: 50%;
+	background-color: white;
+	
+}
+</style>
+<script>
+
+var timer = null;
+
+function
+keydown(e)
+{
+	var k, s, e, f, i, j, left, right, ind, v;
+	
+	k = e.keyCode || e.which;
+	f = e.target;
+	switch(k){
+	case 9:
+		e.preventDefault();
+		document.execCommand("insertText", false, "\t");
+		break;
+	case 13:
+		e.preventDefault();
+		s = f.selectionStart;
+		e = f.selectionEnd;
+		i = f.value.lastIndexOf("\n", s - 1) + 1;
+		for(j = i; {" ": true, "\t": true}[f.value.charAt(j)]; j++)
+			;
+		ind = f.value.substring(i, j);
+		document.execCommand("insertText", false, "\n" + ind);
+		break;
+	}
+	if(timer !== null)
+		window.clearInterval(timer);
+	window.setTimeout(parse, 250);
+}
+function load()
+{
+	var t;
+
+	if(t = localStorage.getItem("text"), t !== undefined)
+		document.getElementById("code").value = t;
+}
+</script>
+</head>
+<body onload="load(); parse()">
+<textarea height="100%" id="code" spellcheck="false" onkeydown="keydown(event)">
+module mod(input wire a, output wire b);
+
+assign b = a + 1;
+
+endmodule
+</textarea>
+<pre id="out">
+</pre>
+</body>
+</html>
