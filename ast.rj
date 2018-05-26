@@ -1,27 +1,25 @@
-"use strict";
-
-function
-maxi(a, b)
+Node
+maxi(Node a, Node b)
 {
-	return new Node({t: "bin", op: "max", n1: a, n2: b});
+	return new Node(Node{t: "bin", op: "max", n1: a, n2: b});
 }
 
-function
-lvalcheck(n, cont)
+void
+lvalcheck(Node n, bool cont)
 {
-	function
-	lvalcheck0(n, cont)
+	void
+	lvalcheck0(Node n, bool cont)
 	{
 		switch(n.t){
 		case "sym":
 			switch(n.sym.t){
 			case "port":
 				if(n.sym.dir == "input")
-					error(n.lineno, "assignment to input port '" + n.sym + "'");
+					error(n.lineno, "assignment to input port '" + n.sym.toString() + "'");
 				if(n.sym.portreg && cont)
-					error(n.lineno, "continuous assignment to reg '" + n.sym + "'");
+					error(n.lineno, "continuous assignment to reg '" + n.sym.toString() + "'");
 				if(!n.sym.portreg && !cont)
-					error(n.lineno, "procedural assignment to wire '" + n.sym + "'");
+					error(n.lineno, "procedural assignment to wire '" + n.sym.toString() + "'");
 				break;
 			default:
 				error(n.lineno, "invalid lval " + n.sym.t);
@@ -35,10 +33,12 @@ lvalcheck(n, cont)
 	lvalcheck0(n, cont);
 }
 
-function
-typecheck(n, ctxt)
+void
+typecheck(Node n, Type ctxt)
 {
-	var i, t1, t2, s;
+	int i;
+	string t1, t2;
+	bool s;
 
 	switch(n.t){
 	case "assign":
@@ -128,7 +128,7 @@ typecheck(n, ctxt)
 		}else if(ctxt !== null && ctxt.t == "unsz" || t1 == "unsz")
 			n.type = n.n1.type.sign ? sunsztype : unsztype;
 		else if(ctxt !== null && (ctxt.t == "bits" || ctxt.t == "bitv" || ctxt.t == "bit"))
-			n.type = type(TYPBITS, n.n1.type.sign, maxi(n.n1.type.sz, ctxt.sz));
+			n.type = new Type("bits", n.n1.type.sign, maxi(n.n1.type.sz, ctxt.sz));
 		else
 			n.type = n.n1.type;
 		break;
@@ -139,7 +139,7 @@ typecheck(n, ctxt)
 		if(n.num.sz === null)
 			n.type = new Type("unsz", n.num.sign, null, null, null);
 		else
-			n.type = new Type("bits", n.num.sign, new Node({t: "cint", lineno: n.lineno, num: n.num.sz}), null, null);
+			n.type = new Type("bits", n.num.sign, new Node(Node{t: "cint", lineno: n.lineno, numi: n.num.sz}), null, null);
 		n.isconst = true;
 		break;
 	case "cint":

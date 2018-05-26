@@ -1,6 +1,4 @@
-"use strict";
-
-var kwtab = {
+bool kwtab[string] = {
 	"always": true, "and": true, "assign": true, 
 	"automatic": true, "begin": true, "buf": true, "bufif0": true, 
 	"bufif1": true, "case": true, "casex": true, "casez": true, 
@@ -35,8 +33,43 @@ var kwtab = {
 	"xor": true
 };
 
-function
-Type(t, sign, lo, hi, elem)
+struct Symbol;
+struct Type;
+struct Const;
+
+struct Node {
+	string t;
+	Type type;
+	bool isconst;
+	Node stat[];
+	string op;
+	Node n1, n2, n3;
+	Symbol sym;
+	Node l[];
+	Const num;
+	int numi;
+	int lineno;
+};
+
+struct Type {
+	string t;
+	bool sign;
+	Node lo;
+	Node hi;
+	Node sz;
+	Type elem;
+};
+
+struct Token {
+	string t;
+	string str;
+	Symbol sym;
+	int base;
+	bool sign;
+};
+
+void
+Type(string t, ... bool sign, Node lo, Node hi, Type elem)
 {
 	this.t = t;
 	this.sign = sign;
@@ -48,50 +81,60 @@ Type(t, sign, lo, hi, elem)
 		this.hi = null;
 	}
 	if(t == "bitv")
-		this.sz = new Node({t: "bin", op: "+", n1: new Node({t: "bin", op: "-", n1: this.hi, n2: this.lo}), n2: new Node({t: "cint", num: 1})});
+		this.sz = new Node(Node{t: "bin", op: "+", n1: new Node(Node{t: "bin", op: "-", n1: this.hi, n2: this.lo}), n2: new Node(Node{t: "cint", numi: 1})});
 	else if(t == "bits")
 		this.sz = lo;
 	else if(t == "bit")
-		this.sz = 1;
+		this.sz = new Node(Node{t: "cint", numi: 1});
 	else
 		this.sz = null;
 	this.elem = elem;
 }
 
-var bittype = new Type("bit", false);
-var sbittype = new Type("bit", true);
-var eventtype = new Type("event", false);
-var unsztype = new Type("unsz", false);
-var sunsztype = new Type("unsz", true);
+Type bittype = new Type("bit", false);
+Type sbittype = new Type("bit", true);
+Type eventtype = new Type("event", false);
+Type unsztype = new Type("unsz", false);
+Type sunsztype = new Type("unsz", true);
+Type realtype = new Type("real");
 
-Type.prototype.toDebug = function()
+string
+Type.toDebug()
 {
 	switch(this.t){
 	case "bit":
 	case "unsz":
 		return this.t + (this.sign ? " signed" : "");
 	case "bitv":
-		return this.t + (this.sign ? " signed [" : " [") + this.hi + ":" + this.lo + "]";
+		return this.t + (this.sign ? " signed [" : " [") + this.hi.toString() + ":" + this.lo.toString() + "]";
 	case "bits":
-		return this.t + (this.sign ? " signed [" : " [") + this.sz + "]";
+		return this.t + (this.sign ? " signed [" : " [") + this.sz.toString() + "]";
 	}
 }
 
-function
-Const(v, sz, sign)
+struct Const {
+	string v;
+	int sz;
+	bool sign;
+};
+
+void
+Const(string v, int sz, bool sign)
 {
 	this.v = v;
 	this.sz = sz;
 	this.sign = sign;
 }
 
-Const.prototype.toString = function()
+string
+Const.toString()
 {
-	var s, i;
+	string s;
+	int i;
 
 	s = "";
 	if(this.sz !== null)
-		s += this.sz;
+		s += this.sz.toString();
 	if(this.sign)
 		s += "'sb";
 	else
@@ -102,18 +145,21 @@ Const.prototype.toString = function()
 }
 
 function
-Node(attr)
+Node(Node attr)
 {
-	var i;
+	string i;
 
 	for(i in attr)
 		this[i] = attr[i];
 	this.isconst = false;
 }
 
-Node.prototype.toString = function(ind, lvl)
+string
+Node.toString(...string ind, int lvl)
 {
-	var s, i, t;
+	string s;
+	var t;
+	int i;
 
 	if(ind === undefined) ind = "";
 	if(lvl === undefined) lvl = 0;
@@ -141,21 +187,23 @@ Node.prototype.toString = function(ind, lvl)
 		s += "}";
 		return s;
 	case "assign":
-		return this.n1 + " = " + this.n2 + ";";
+		return this.n1.toString() + " = " + this.n2.toString() + ";";
 	case "num":
 		return this.num.toString();
 	case "cint":
-		return this.num.toString();
+		return this.numi.toString();
 	case "un":
-		return this.op + this.n1;
+		return this.op + this.n1.toString();
 	default:
 		return this.t + "(...)";
 	}
 }
 
-Node.prototype.toDebug = function(ind)
+string
+Node.toDebug(... string ind)
 {
-	var i, s, tab;
+	int i;
+	string s, tab;
 
 	tab = "  ";
 	if(ind === undefined) ind = "";
@@ -177,30 +225,59 @@ Node.prototype.toDebug = function(ind)
 		s += this.n2.toDebug(ind + tab);
 		break;
 	case "num":
-	case "cint":
 		s += ind + tab + this.num.toString() + "\n";
+		break;
+	case "cint":
+		s += ind + tab + this.numi.toString() + "\n";
 	}
 	return s;
 }
 
-function
-Symbol(name)
+struct Symbol {
+	string name;
+	string t;
+	string dir;
+	int lineno;
+	bool portreg;
+	Type type;
+};
+
+void
+Symbol(string name)
 {
 	this.name = name;
 }
 
-Symbol.prototype.toString = function()
+string
+Symbol.toString()
 {
 	return this.name;
 }
 
+struct Scope {
+	Scope up;
+	Symbol sym;
+	Symbol tab[string];
+};
+
 function
-Scope(up, sym)
+Scope(Scope up, Symbol sym)
 {
 	this.up = up;
 	this.sym = sym;
 	this.tab = {};
 }
+
+struct Parser {
+	string s;
+	int idx;
+	int lineno;
+	Token peektok;
+	Scope global;
+	Scope scope;
+	Token nextnum;
+	string str;
+};
 
 function
 Parser(s)
@@ -214,9 +291,10 @@ Parser(s)
 	this.nextnum = null;
 }
 
-Parser.prototype.getsym = function(name)
+Symbol
+Parser.getsym(string name)
 {
-	var sc;
+	Scope sc;
 	
 	for(sc = this.scope; sc !== null; sc = sc.up)
 		if(sc.tab[name] !== undefined && sc.tab[name].t !== undefined)
@@ -224,61 +302,64 @@ Parser.prototype.getsym = function(name)
 	return this.scope.tab[name] = new Symbol(name);
 }
 
-Parser.prototype.newscope = function(sym)
+void
+Parser.newscope(Symbol sym)
 {
 	this.scope = new Scope(this.scope, sym);
 }
 
-Parser.prototype.scopeup = function()
+void
+Parser.scopeup()
 {
 	this.scope = this.scope.up;
 }
 
 function
-error(line, str)
+error(int line, string str)
 {
-	if(line === null || line === undefined)
-		line = this.lineno;
-	throw "line " + line + ": " + str;
+	throw "line " + line.toString() + ": " + str;
 }
 
-Parser.prototype.getc = function()
+string
+Parser.getc()
 {
-	var c;
+	string c;
 	
 	c = this.str.charAt(this.idx++);
 	if(c == "\n") this.lineno++;
 	return c;
 }
 
-Parser.prototype.ungetc = function()
+void
+Parser.ungetc()
 {
 	if(this.str.charAt(--this.idx) == "\n")
 		this.lineno--;
 }
 
-function
-isspace(s)
+bool
+isspace(string s)
 {
 	return s == " " || s == "\t" || s == "\n";
 }
 
-function
-isdigit(s)
+bool
+isdigit(string s)
 {
 	return s >= "0" && s <= "9";
 }
 
-function
-isident(s)
+bool
+isident(string s)
 {
 	return s >= "A" && s <= "Z" || s >= "a" && s <= "z" || s >= "0" && s <= "9" || s == "_" || s == "$";
 }
 
-function
-decconv(lno, s)
+string
+decconv(int lno, string s)
 {
-	var r, digs, p, i;
+	string r, digs, p;
+	int i;
 
 	r = "0";
 	digs = "00000 10000 01000 11000 00100 10100 01100 11100 00010 10010";
@@ -292,50 +373,51 @@ decconv(lno, s)
 	return r;
 }
 
-function
-numparse(lno, a, b, c)
+Const
+numparse(int lno, Token a, Token b, Token c)
 {
-	var r, p, i, digs;
+	string r, digs;
+	int i, p;
 
 	if(b == null)
-		b = {base: 10, sign: true};
+		b = Token{base: 10, sign: true};
 	switch(b.base){
 	case 2:
 		r = "";
-		for(i = 0; i < c.s.length; i++){
-			p = "01xXzZ?".indexOf(c.s[i]);
+		for(i = 0; i < c.str.length; i++){
+			p = "01xXzZ?".indexOf(c.str[i]);
 			if(p < 0)
-				error(lno, "invalid character '" + c.s[i] + "' in binary number");
+				error(lno, "invalid character '" + c.str[i] + "' in binary number");
 			r = "01xXzZ?"[p] + r;
 		}
-		if("01".indexOf(c.s[0]) >= 0)
+		if("01".indexOf(c.str[0]) >= 0)
 			r = r + "0";
 		break;
 	case 8:
 		digs = "000 100 010 110 001 101 110 111 xxx xxx zzz zzz zzz";
 		r = "";
-		for(i = 0; i < c.s.length; i++){
-			p = "01234567xXzZ?".indexOf(c.s[i]);
+		for(i = 0; i < c.str.length; i++){
+			p = "01234567xXzZ?".indexOf(c.str[i]);
 			if(p < 0)
-				error(lno, "invalid character '" + c.s[i] + "' in octal number");
+				error(lno, "invalid character '" + c.str[i] + "' in octal number");
 			r = digs.substr(p * 4, 3) + r;
 		}
-		if("01234567".indexOf(c.s[0]) >= 0)
+		if("01234567".indexOf(c.str[0]) >= 0)
 			r = r + "0";
 		break;
 	case 10:
-		if(c.s.length == 1 && (i = "xXzZ?".indexOf(c.s)) >= 0)
+		if(c.str.length == 1 && (i = "xXzZ?".indexOf(c.str)) >= 0)
 			r = "xxzzz"[i];
 		else
-			r = decconv(lno, c.s);
+			r = decconv(lno, c.str);
 		break;
 	case 16:
 		digs = "0000 1000 0100 1100 0010 1010 1100 1110 0001 1001 0101 1101 0011 1011 0111 1111 xxxx zzzz zzzz";
 		r = "";
-		for(i = 0; i < c.s.length; i++){
-			p = "0123456789abcdefxz?".indexOf(c.s[i].toLowerCase());
+		for(i = 0; i < c.str.length; i++){
+			p = "0123456789abcdefxz?".indexOf(c.str[i].toLowerCase());
 			if(p < 0)
-				error(lno, "invalid character '" + c.s[i] + "' in hexadecimal number");
+				error(lno, "invalid character '" + c.str[i] + "' in hexadecimal number");
 			r = digs.substr(p * 5, 4) + r;
 		}
 		if("xz".indexOf(r[r.length - 1]) < 0)
@@ -343,16 +425,16 @@ numparse(lno, a, b, c)
 		break;
 	
 	default:
-		error(lno, "unimplemented base " + b.base);
+		error(lno, "unimplemented base " + b.base.toString());
 	}
 	if(a !== null){
-		p = parseInt(a.s, 10);
+		p = parseInt(a.str, 10);
 		return new Const(b.sign ? mpxtend(r, p) : mptrunc(r, p), p, b.sign);
 	}
 	return new Const(mpnorm(r), null, b.sign);
 }
 
-var longop = {
+string longop[string] = {
 	"!=": "!=",
 	"!==": "!==",
 	"&&": "&&",
@@ -371,7 +453,7 @@ var longop = {
 	"~^": "~^",
 	"~|": "~|"
 };
-var opchar = {
+bool opchar[string] = {
 	"!": true,
 	"&": true,
 	"*": true,
@@ -383,9 +465,12 @@ var opchar = {
 	"~": true
 };
 
-Parser.prototype.lex = function()
+Token
+Parser.lex()
 {
-	var c, s, t, i;
+	string c, s, r;
+	int i;
+	Token t;
 	
 	if(this.peektok !== null){
 		t = this.peektok;
@@ -396,7 +481,7 @@ Parser.prototype.lex = function()
 		do{
 			c = this.getc();
 		}while(isspace(c));
-		if(c == "") return {t: "EOF"};
+		if(c == "") return Token{t: "EOF"};
 		if(c == "/"){
 			c = this.getc();
 			if(c == "/"){
@@ -413,7 +498,7 @@ Parser.prototype.lex = function()
 				continue again;
 			}else{
 				this.ungetc();
-				return {t: "/"};
+				return Token{t: "/"};
 			}
 		}
 		if(c == "\""){
@@ -429,29 +514,29 @@ Parser.prototype.lex = function()
 					case "t": s += "\t"; break;
 					default:
 						if(isdigit(c)){
-							t = "";
+							r = "";
 							i = 0;
 							do
-								t += c;
+								r += c;
 							while(++i < 3 && (c = this.getc(), isdigit(c)));
 							if(i < 3){
 								this.ungetc();
-								s += "\\" + t;
+								s += "\\" + r;
 							}else
-								s += String.fromCharCode(parseInt(t, 8));
+								s += String.fromCharCode(parseInt(r, 8));
 						}else
 							s += c;
 					}
 				else
 					s += c;
 			}
-			return {t: "str", s: s};
+			return Token{t: "str", str: s};
 		}
 		if(c == "\\"){
 			s = "";
 			while(c = this.getc(), c != "" && !isspace(c))
 				s += c;
-			return {t: "id", s: this.getsym(s)};
+			return Token{t: "id", sym: this.getsym(s)};
 		}
 		if(isdigit(c) || this.nextnum && (isident(c) || c == "?")){
 			s = c;
@@ -461,7 +546,7 @@ Parser.prototype.lex = function()
 					s += c;
 			this.ungetc();
 			this.nextnum = null;
-			return {t: "num", s: s};
+			return Token{t: "num", str: s};
 		}
 		if(isident(c)){
 			s = c;
@@ -469,8 +554,8 @@ Parser.prototype.lex = function()
 				s += c;
 			this.ungetc();
 			if(kwtab[s])
-				return {t: "kw:" + s};
-			return {t: "id", s: this.getsym(s)};
+				return Token{t: "kw:" + s};
+			return Token{t: "id", sym: this.getsym(s)};
 		}
 		if(c == "'"){
 			s = c;
@@ -483,36 +568,39 @@ Parser.prototype.lex = function()
 				s += c;
 			else
 				this.ungetc();
-			return this.nextnum = {t: "base", base: {"b": 2, "B": 2, "o": 8, "O": 8, "d": 10, "D": 10, "h": 16, "H": 16}[c], sign: s[1] == "s" || s[1] == "S"};
+			return this.nextnum = Token{t: "base", base: {"b": 2, "B": 2, "o": 8, "O": 8, "d": 10, "D": 10, "h": 16, "H": 16}[c], sign: s[1] == "s" || s[1] == "S"};
 		}
 		if(opchar[c]){
 			s = c;
 			while(c = this.getc(), c != "" && longop[s + c] !== undefined)
 				s += c;
 			this.ungetc();
-			return {t: longop[s] || s};
+			return Token{t: longop[s] || s};
 		}
-		return {t: c};
+		return Token{t: c};
 	}
 }
 
-Parser.prototype.superman = function(t)
+void
+Parser.superman(Token t)
 {
 	if(this.peektok !== null)
 		throw "This is not Superman IV";
 	this.peektok = t;
 }
 
-Parser.prototype.peek = function()
+Token
+Parser.peek()
 {
 	if(this.peektok !== null)
 		return this.peektok;
 	return this.peektok = this.lex();
 }
 
-Parser.prototype.expect = function(tt)
+Token
+Parser.expect(string tt)
 {
-	var t;
+	Token t;
 	
 	t = this.lex();
 	if(t.t !== tt)
@@ -520,9 +608,12 @@ Parser.prototype.expect = function(tt)
 	return t;
 }
 
-Parser.prototype.expectany = function(tt)
+Token
+Parser.expectany(bool tt[string])
 {
-	var t, s, first, i;
+	Token t;
+	string s, i;
+	bool first;
 	
 	t = this.lex();
 	if(tt[t.t] !== true){
@@ -538,27 +629,31 @@ Parser.prototype.expectany = function(tt)
 	return t;
 }
 
-Parser.prototype.got = function(tt)
+Token
+Parser.got(string tt)
 {
 	if(this.peek().t === tt)
 		return this.lex();
 	return null;
 }
 
-Parser.prototype.gotany = function(tt)
+Token
+Parser.gotany(bool tt[string])
 {
 	if(tt[this.peek().t] !== null)
 		return this.lex();
 	return null;
 }
 
-Parser.prototype.p_attributes = function()
+void
+Parser.p_attributes()
 {
 }
 
-Parser.prototype.p_range = function()
+Node
+Parser.p_range[]()
 {
-	var a, b;
+	Node a, b;
 
 	this.expect("[");
 	a = this.p_expr();
@@ -568,9 +663,14 @@ Parser.prototype.p_range = function()
 	return [a, b];
 }
 
-Parser.prototype.p_port_declaration = function()
+void
+Parser.p_port_declaration()
 {
-	var dir, wire, signed, type, range, sym;
+	string dir;
+	bool wire;
+	bool signed;
+	Node range[];
+	Symbol sym;
 
 	this.p_attributes();
 	dir = this.expectany({"kw:input": true, "kw:output": true, "kw:inout": true}).t.substr(3);
@@ -580,7 +680,7 @@ Parser.prototype.p_port_declaration = function()
 		range = this.p_range();
 	else
 		range = null;
-	sym = this.expect("id").s;
+	sym = this.expect("id").sym;
 	
 	sym.t = "port";
 	sym.dir = dir;
@@ -591,52 +691,56 @@ Parser.prototype.p_port_declaration = function()
 		sym.type = new Type("bitv", signed, range[1], range[0], null);
 }
 
-Parser.prototype.p_delay3 = function()
+void
+Parser.p_delay3()
 {
 	if(this.got("#") !== null){
 		this.expect("num");
 	}
 }
 
-Parser.prototype.p_hier_identifier = function()
+Node
+Parser.p_hier_identifier()
 {
-	var s, n;
+	Symbol s;
+	Node n;
 	
-	s = this.expect("id").s;
+	s = this.expect("id").sym;
 	if(s.t === undefined)
-		error(this.lineno, "undeclared '" + s + "'");
-	n = new Node({t: "sym", sym: s, lineno: this.lineno});
+		error(this.lineno, "undeclared '" + s.toString() + "'");
+	n = new Node(Node{t: "sym", sym: s, lineno: this.lineno});
 /*	while(this.got(".") !== null)
-		n = new Node({t: "hier", n1: n, n2: this.expect("id").s});*/
+		n = new Node(Node{t: "hier", n1: n, n2: this.expect("id").s});*/
 	
 	return n;
 }
 
-Parser.prototype.p_lvalue = function()
+Node
+Parser.p_lvalue()
 {
-	var n, l, a;
+	Node l[], n, a;
 	
 	if(this.got("{") !== null){
 		l = [this.p_lvalue()];
 		while(this.got(",") !== null)
 			l.push(this.p_lvalue());
 		this.expect("}");
-		return new Node({t: "concat", l: l, lineno: this.lineno});
+		return new Node(Node{t: "concat", l: l, lineno: this.lineno});
 	}else{
 		n = this.p_hier_identifier();
 		while(this.got("[") !== null){
 			a = this.p_expr();
 			if(this.got(":") !== null)
-				n = new Node({t: "idx", n1: n, n2: a, n3: this.p_expr(), lineno: this.lineno});
+				n = new Node(Node{t: "idx", n1: n, n2: a, n3: this.p_expr(), lineno: this.lineno});
 			else
-				n = new Node({t: "idx", n1: n, n2: a, n3: null, lineno: this.lineno});
+				n = new Node(Node{t: "idx", n1: n, n2: a, n3: null, lineno: this.lineno});
 			this.expect("]");
 		}
 		return n;
 	}
 }
 
-var untab = {
+bool untab[string] = {
 	"+": true,
 	"-": true,
 	"!": true,
@@ -649,9 +753,12 @@ var untab = {
 	"~^": true
 };
 
-Parser.prototype.p_primary = function()
+Node
+Parser.p_primary()
 {
-	var t, n, a, b, c;
+	Token t, a, b, c;
+	Node n;
+	Const cn;
 
 	switch(t = this.lex(), t.t){
 	case "id":
@@ -666,17 +773,17 @@ Parser.prototype.p_primary = function()
 			a = null;
 			c = t;
 		}
-		n = numparse(this.lineno, null, b, c);
-		if(n.sign && n.v.length < 32 && n.v.indexOf("x") < 0 && n.v.indexOf("z") < 0)
-			return new Node({t: "cint", num: mptoi(n.v), lineno: this.lineno});
-		return new Node({t: "num", num: n, lineno: this.lineno});
+		cn = numparse(this.lineno, null, b, c);
+		if(cn.sign && cn.v.length < 32 && cn.v.indexOf("x") < 0 && cn.v.indexOf("z") < 0)
+			return new Node(Node{t: "cint", numi: mptoi(cn.v), lineno: this.lineno});
+		return new Node(Node{t: "num", num: cn, lineno: this.lineno});
 	case "base":
 		b = t;
 		c = this.expect("num");
-		n = numparse(this.lineno, null, b, c);
-		if(n.sign && n.v.length < 32 && n.v.indexOf("x") < 0 && n.v.indexOf("z") < 0)
-			return new Node({t: "cint", num: mptoi(n.v), lineno: this.lineno});
-		return new Node({t: "num", num: n, lineno: this.lineno});
+		cn = numparse(this.lineno, null, b, c);
+		if(cn.sign && cn.v.length < 32 && cn.v.indexOf("x") < 0 && cn.v.indexOf("z") < 0)
+			return new Node(Node{t: "cint", numi: mptoi(cn.v), lineno: this.lineno});
+		return new Node(Node{t: "num", num: cn, lineno: this.lineno});
 	case "(":
 		n = this.p_expr();
 		this.expect(")");
@@ -684,13 +791,13 @@ Parser.prototype.p_primary = function()
 	default:
 		if(untab[t.t] !== undefined){
 			this.p_attributes();
-			return new Node({t: "un", op: t.t, n1: this.p_primary(), lineno: this.lineno});
+			return new Node(Node{t: "un", op: t.t, n1: this.p_primary(), lineno: this.lineno});
 		}
 		error(this.lineno, "unexpected " + t.t);
 	}
 }
 
-var optab = {
+var optab[string] = {
 	"**": {prec: 11},
 	"*": {prec: 10},
 	"/": {prec: 10},
@@ -718,16 +825,20 @@ var optab = {
 	"max": {prec: 0},
 };
 
-Parser.prototype.p_expr_core = function()
+Node
+Parser.p_expr_core()
 {
-	var ex, op, t, a;
+	Node ex[];
+	var op[];
+	string t;
+	Node a;
 	
 	ex = [this.p_primary()];
 	op = [];
 	while(optab[t = this.peek().t] !== undefined){
 		while(op.length > 0 && optab[op[0]].prec >= optab[t].prec){
 			a = ex.shift();
-			ex[0] = new Node({t: "bin", op: op.shift(), n1: ex[0], n2: a, lineno: this.lineno});
+			ex[0] = new Node(Node{t: "bin", op: op.shift(), n1: ex[0], n2: a, lineno: this.lineno});
 		}
 		this.lex();
 		op.unshift(t);
@@ -736,14 +847,15 @@ Parser.prototype.p_expr_core = function()
 	}
 	while(op.length > 0){
 		a = ex.shift();
-		ex[0] = new Node({t: "bin", op: op.shift(), n1: ex[0], n2: a, lineno: this.lineno});
+		ex[0] = new Node(Node{t: "bin", op: op.shift(), n1: ex[0], n2: a, lineno: this.lineno});
 	}
 	return ex[0];
 }
 
-Parser.prototype.p_expr = function()
+Node
+Parser.p_expr()
 {
-	var p, q, r, l;
+	Node p, q, l[], r;
 	
 	if(this.got("{") !== null){
 		p = this.p_expr();
@@ -751,42 +863,44 @@ Parser.prototype.p_expr = function()
 			q = this.p_expr();
 			this.expect("}");
 			this.expect("}");
-			return new Node({t: "repl", n1: p, n2: q, lineno: this.lineno});
+			return new Node(Node{t: "repl", n1: p, n2: q, lineno: this.lineno});
 		}else{
 			l = [p];
 			while(this.got(",") !== null)
 				l.push(this.p_expr());
 			while(this.got(",") !== null);
 			this.expect("}");
-			return new Node({t: "concat", l: l, lineno: this.lineno});
+			return new Node(Node{t: "concat", l: l, lineno: this.lineno});
 		}
 	}else{
 		p = this.p_expr_core();
-		if(this.got("?")){
+		if(this.got("?") !== null){
 			q = this.p_expr();
 			this.expect(":");
 			r = this.p_expr();
-			return new Node({t: "tern", n1: p, n2: q, n3: r, lineno: this.lineno});
+			return new Node(Node{t: "tern", n1: p, n2: q, n3: r, lineno: this.lineno});
 		}else
 			return p;
 	}
 	
 }
 
-Parser.prototype.p_assignment = function()
+Node
+Parser.p_assignment()
 {
-	var l, r;
+	Node l, r;
 	
 	l = this.p_lvalue();
 	this.expect("=");
 	r = this.p_expr();
-	return new Node({t: "assign", n1: l, n2: r, lineno: this.lineno});
+	return new Node(Node{t: "assign", n1: l, n2: r, lineno: this.lineno});
 }
 
-Parser.prototype.p_module_item = function()
+Node
+Parser.p_module_item[]()
 {
-	var t;
-	var r;
+	Token t;
+	Node r[];
 	
 	r = [];
 	switch(t = this.lex(), t.t){
@@ -803,15 +917,19 @@ Parser.prototype.p_module_item = function()
 	return r;
 }
 
-Parser.prototype.p_module = function()
+Node
+Parser.p_module()
 {
-	var r, n, lno;
+	Symbol s;
+	Node n;
+	int lno;
+	Node r[];
 
 	this.p_attributes();
 	this.expect("kw:module");
 	lno = this.lineno;
-	n = this.expect("id");
-	this.newscope(n);
+	s = this.expect("id").sym;
+	this.newscope(s);
 	try{
 		if(this.got("(") !== null && this.got(")") === null){
 			this.p_port_declaration();
@@ -823,23 +941,27 @@ Parser.prototype.p_module = function()
 		r = [];
 		while(this.got("kw:endmodule") === null)
 			r.push.apply(r, this.p_module_item());
-		n = new Node({t: "module", sym: n, stat: r, lineno: lno});
+		n = new Node(Node{t: "module", sym: s, stat: r, lineno: lno});
 	}finally{
-		this.scopeup(n);
+		this.scopeup();
 	}
 	return n;
 }
 
-function parse()
+void
+parse()
 {
-	var p, s, m;
+	string s;
+	Parser p;
+	Node m;
+	var e;
 	
 	s = document.getElementById("code").value;
 	localStorage.setItem("text", s);
 	p = new Parser(s);
 	try{
 		m = p.p_module();
-		typecheck(m);
+		typecheck(m, null);
 		document.getElementById("out").innerHTML = m.toDebug();
 	}catch(e){
 		document.getElementById("out").innerHTML = e;

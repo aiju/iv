@@ -1,25 +1,38 @@
-"use strict";
+string string.charAt(int);
+int string.charCodeAt(int);
+string string.substr(int, ... int);
+string string.repeat(int);
+int string.length;
+int parseInt(string, ... int);
+string int.toString();
+int string.indexOf(string);
+string string.toLowerCase();
+extern var String;
+extern bool false, true;
+extern var null, undefined;
+extern var document;
+extern var localStorage;
 
-function
-max(a, b)
+int
+max(int a, int b)
 {
 	return a > b ? a : b;
 }
 
-function
-mpdig(s, i)
+string
+mpdig(string s, int i)
 {
-	var t;
+	string t;
 	
 	t = s.charAt(i);
 	if(t == "") return s.charAt(s.length - 1);
 	return t;
 }
 
-function
-mpnorm(r)
+string
+mpnorm(string r)
 {
-	var i;
+	int i;
 
 	i = r.length - 2;
 	while(i >= 0 && r.charAt(i) == r.charAt(r.length - 1))
@@ -27,10 +40,11 @@ mpnorm(r)
 	return r.substr(0, i + 2);
 }
 
-function
-mpadd(a, b)
+string
+mpadd(string a, string b)
 {
-	var m, r, c, i;
+	int i, m, c;
+	string r;
 	
 	m = max(a.length, b.length) + 1;
 	c = 0;
@@ -44,10 +58,11 @@ mpadd(a, b)
 	return mpnorm(r);
 }
 
-function
-mpsub(a, b)
+string
+mpsub(string a, string b)
 {
-	var m, r, c, i;
+	int i, m, c;
+	string r;
 	
 	m = max(a.length, b.length) + 1;
 	c = 1;
@@ -61,11 +76,11 @@ mpsub(a, b)
 	return mpnorm(r);
 }
 
-
-function
-mpmul(a, b)
+string
+mpmul(string a, string b)
 {
-	var i, r;
+	int i;
+	string r;
 	
 	r = "0";
 	for(i = 0; i < b.length - 1; i++)
@@ -76,22 +91,22 @@ mpmul(a, b)
 	return r;
 }
 
-function
-mptrunc(a, n)
+string
+mptrunc(string a, int n)
 {
 	return mpnorm(a.substr(0, n) + "0");
 }
 
-function
-mpxtend(a, n)
+string
+mpxtend(string a, int n)
 {
 	return mpnorm(a.substr(0, n));
 }
 
-function
-mptoi(n)
+int
+mptoi(string n)
 {
-	var i, r;
+	int i, r;
 	
 	r = -parseInt(n.charAt(n.length - 1));
 	for(i = n.length - 2; i >= 0; i--)
