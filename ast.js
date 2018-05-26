@@ -3,7 +3,7 @@
 function
 maxi(a, b)
 {
-	return a > b ? a : b;
+	return new Node({t: "bin", op: "max", n1: a, n2: b});
 }
 
 function
@@ -58,7 +58,7 @@ typecheck(n, ctxt)
 			typecheck(n.n2, ctxt);
 		}
 		n.isconst = n.n1.isconst && n.n2.isconst;
-		s = n.n1.sign && n.n2.sign;
+		s = n.n1.type.sign && n.n2.type.sign;
 		t1 = n.n1.type.t;
 		t2 = n.n2.type.t;
 		if(t1 == "mem" || t2 == "mem"){
@@ -111,6 +111,26 @@ typecheck(n, ctxt)
 		break;
 	case "un":
 		typecheck(n.n1, ctxt);
+		n.isconst = n.n1.isconst;
+		t1 = n.n1.type.t;
+		if(t1 == "mem")
+			error(n.lineno, "memory in expression");
+		else if(t1 == "event")
+			error(n.lineno, "event in expression");
+		if(n.op == "!")
+			n.type = bittype;
+		else if(n.op == "posedge" || n.op == "negedge")
+			n.type = eventtype;
+		else if(t1 == "real"){
+			if(n.op != "+" && n.op != "-")
+				error(n.lineno, "real in expression");
+			n.type = n.n1.type;
+		}else if(ctxt !== null && ctxt.t == "unsz" || t1 == "unsz")
+			n.type = n.n1.type.sign ? sunsztype : unsztype;
+		else if(ctxt !== null && (ctxt.t == "bits" || ctxt.t == "bitv" || ctxt.t == "bit"))
+			n.type = type(TYPBITS, n.n1.type.sign, maxi(n.n1.type.sz, ctxt.sz));
+		else
+			n.type = n.n1.type;
 		break;
 	case "sym":
 		n.type = n.sym.type;
@@ -119,7 +139,11 @@ typecheck(n, ctxt)
 		if(n.num.sz === null)
 			n.type = new Type("unsz", n.num.sign, null, null, null);
 		else
-			n.type = new Type("bits", n.num.sign, n.num.sz, null, null);
+			n.type = new Type("bits", n.num.sign, new Node({t: "cint", lineno: n.lineno, num: n.num.sz}), null, null);
+		n.isconst = true;
+		break;
+	case "cint":
+		n.type = unsztype;
 		n.isconst = true;
 		break;
 	case "module":

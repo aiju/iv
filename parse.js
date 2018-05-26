@@ -48,7 +48,7 @@ Type(t, sign, lo, hi, elem)
 		this.hi = null;
 	}
 	if(t == "bitv")
-		this.sz = this.hi - this.lo + 1;
+		this.sz = new Node({t: "bin", op: "+", n1: new Node({t: "bin", op: "-", n1: this.hi, n2: this.lo}), n2: new Node({t: "cint", num: 1})});
 	else if(t == "bits")
 		this.sz = lo;
 	else if(t == "bit")
@@ -87,7 +87,18 @@ Const(v, sz, sign)
 
 Const.prototype.toString = function()
 {
-	return this.v + "[" + this.sz + "] signed=" + this.sign;
+	var s, i;
+
+	s = "";
+	if(this.sz !== null)
+		s += this.sz;
+	if(this.sign)
+		s += "'sb";
+	else
+		s += "'b";
+	for(i = 0; i < this.v.length; i++)
+		s += this.v.charAt(this.v.length - 1 - i);
+	return s;
 }
 
 function
@@ -133,6 +144,8 @@ Node.prototype.toString = function(ind, lvl)
 		return this.n1 + " = " + this.n2 + ";";
 	case "num":
 		return this.num.toString();
+	case "cint":
+		return this.num.toString();
 	case "un":
 		return this.op + this.n1;
 	default:
@@ -163,6 +176,9 @@ Node.prototype.toDebug = function(ind)
 		s += this.n1.toDebug(ind + tab);
 		s += this.n2.toDebug(ind + tab);
 		break;
+	case "num":
+	case "cint":
+		s += ind + tab + this.num.toString() + "\n";
 	}
 	return s;
 }
@@ -260,6 +276,23 @@ isident(s)
 }
 
 function
+decconv(lno, s)
+{
+	var r, digs, p, i;
+
+	r = "0";
+	digs = "00000 10000 01000 11000 00100 10100 01100 11100 00010 10010";
+	for(i = 0; i < s.length; i++){
+		p = s.charAt(i);
+		if(p < "0" || p > "9")
+			error(lno, "invalid character '" + p + "' in decimal number");
+		r = mpmul(r, "01010");
+		r = mpadd(r, digs.substr((s.charCodeAt(i) - 48) * 6, 5));
+	}
+	return r;
+}
+
+function
 numparse(lno, a, b, c)
 {
 	var r, p, i, digs;
@@ -291,19 +324,10 @@ numparse(lno, a, b, c)
 			r = r + "0";
 		break;
 	case 10:
-		if(c.s.length == 1 && (i = "xXzZ?".indexOf(c.s)) >= 0){
+		if(c.s.length == 1 && (i = "xXzZ?".indexOf(c.s)) >= 0)
 			r = "xxzzz"[i];
-		}else{
-			r = "0";
-			digs = "00000 10000 01000 11000 00100 10100 01100 11100 00010 10010";
-			for(i = 0; i < c.s.length; i++){
-				p = c.s.charAt(i);
-				if(p < "0" || p > "9")
-					error(lno, "invalid character '" + p + "' in decimal number");
-				r = mpmul(r, "01010");
-				r = mpadd(r, digs.substr((c.s.charCodeAt(i) - 48) * 6, 5));
-			}
-		}
+		else
+			r = decconv(lno, c.s);
 		break;
 	case 16:
 		digs = "0000 1000 0100 1100 0010 1010 1100 1110 0001 1001 0101 1101 0011 1011 0111 1111 xxxx zzzz zzzz";
@@ -378,6 +402,7 @@ Parser.prototype.lex = function()
 			if(c == "/"){
 				while(c = this.getc(), c != "" && c != "\n");
 					;
+				continue again;
 			}else if(c == "*"){
 				do{
 					while(c = this.getc(), c != "" && c != "*")
@@ -641,11 +666,17 @@ Parser.prototype.p_primary = function()
 			a = null;
 			c = t;
 		}
-		return new Node({t: "num", num: numparse(this.lineno, a, b, c), lineno: this.lineno});
+		n = numparse(this.lineno, null, b, c);
+		if(n.sign && n.v.length < 32 && n.v.indexOf("x") < 0 && n.v.indexOf("z") < 0)
+			return new Node({t: "cint", num: mptoi(n.v), lineno: this.lineno});
+		return new Node({t: "num", num: n, lineno: this.lineno});
 	case "base":
 		b = t;
 		c = this.expect("num");
-		return new Node({t: "num", num: numparse(this.lineno, null, b, c), lineno: this.lineno});
+		n = numparse(this.lineno, null, b, c);
+		if(n.sign && n.v.length < 32 && n.v.indexOf("x") < 0 && n.v.indexOf("z") < 0)
+			return new Node({t: "cint", num: mptoi(n.v), lineno: this.lineno});
+		return new Node({t: "num", num: n, lineno: this.lineno});
 	case "(":
 		n = this.p_expr();
 		this.expect(")");
@@ -683,7 +714,8 @@ var optab = {
 	"~^": {prec: 4},
 	"|": {prec: 3},
 	"&&": {prec: 2},
-	"||": {prec: 1}
+	"||": {prec: 1},
+	"max": {prec: 0},
 };
 
 Parser.prototype.p_expr_core = function()

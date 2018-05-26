@@ -87,3 +87,14 @@ mpxtend(a, n)
 {
 	return mpnorm(a.substr(0, n));
 }
+
+function
+mptoi(n)
+{
+	var i, r;
+	
+	r = -parseInt(n.charAt(n.length - 1));
+	for(i = n.length - 2; i >= 0; i--)
+		r = r * 2 + parseInt(n.charAt(i));
+	return r;
+}
