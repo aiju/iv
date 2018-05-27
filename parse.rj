@@ -38,7 +38,19 @@ struct Type;
 struct Const;
 
 struct Node {
-	string t;
+	enum NodeType {
+		ASTMODULE,
+		ASTASSIGN,
+		ASTSYM,
+		ASTBIN,
+		ASTCINT,
+		ASTCONCAT,
+		ASTNUM,
+		ASTUN,
+		ASTIDX,
+		ASTREPL,
+		ASTTERN,
+	} t;
 	Type type;
 	bool isconst;
 	Node stat[];
@@ -52,7 +64,15 @@ struct Node {
 };
 
 struct Type {
-	string t;
+	enum TypeType {
+		TYPBIT,
+		TYPBITS,
+		TYPBITV,
+		TYPUNSZ,
+		TYPEVENT,
+		TYPREAL,
+		TYPMEM
+	} t;
 	bool sign;
 	Node lo;
 	Node hi;
@@ -69,46 +89,46 @@ struct Token {
 };
 
 void
-Type(string t, ... bool sign, Node lo, Node hi, Type elem)
+Type(TypeType t, ... bool sign, Node lo, Node hi, Type elem)
 {
 	this.t = t;
 	this.sign = sign;
-	if(t == "bitv"){
+	if(t == TYPBITV){
 		this.lo = lo;
 		this.hi = hi;
 	}else{
 		this.lo = null;
 		this.hi = null;
 	}
-	if(t == "bitv")
-		this.sz = new Node(Node{t: "bin", op: "+", n1: new Node(Node{t: "bin", op: "-", n1: this.hi, n2: this.lo}), n2: new Node(Node{t: "cint", numi: 1})});
-	else if(t == "bits")
+	if(t == TYPBITV)
+		this.sz = new Node(Node{t: ASTBIN, op: "+", n1: new Node(Node{t: ASTBIN, op: "-", n1: this.hi, n2: this.lo}), n2: new Node(Node{t: ASTCINT, numi: 1})});
+	else if(t == TYPBITS)
 		this.sz = lo;
-	else if(t == "bit")
-		this.sz = new Node(Node{t: "cint", numi: 1});
+	else if(t == TYPBIT)
+		this.sz = new Node(Node{t: ASTCINT, numi: 1});
 	else
 		this.sz = null;
 	this.elem = elem;
 }
 
-Type bittype = new Type("bit", false);
-Type sbittype = new Type("bit", true);
-Type eventtype = new Type("event", false);
-Type unsztype = new Type("unsz", false);
-Type sunsztype = new Type("unsz", true);
-Type realtype = new Type("real");
+Type bittype = new Type(TYPBIT, false);
+Type sbittype = new Type(TYPBIT, true);
+Type eventtype = new Type(TYPEVENT, false);
+Type unsztype = new Type(TYPUNSZ, false);
+Type sunsztype = new Type(TYPUNSZ, true);
+Type realtype = new Type(TYPREAL);
 
 string
 Type.toDebug()
 {
 	switch(this.t){
-	case "bit":
-	case "unsz":
-		return this.t + (this.sign ? " signed" : "");
-	case "bitv":
-		return this.t + (this.sign ? " signed [" : " [") + this.hi.toString() + ":" + this.lo.toString() + "]";
-	case "bits":
-		return this.t + (this.sign ? " signed [" : " [") + this.sz.toString() + "]";
+	case TYPBIT:
+	case TYPUNSZ:
+		return (string)this.t + (this.sign ? " signed" : "");
+	case TYPBITV:
+		return (string)this.t + (this.sign ? " signed [" : " [") + this.hi.toString() + ":" + this.lo.toString() + "]";
+	case TYPBITS:
+		return (string)this.t + (this.sign ? " signed [" : " [") + this.sz.toString() + "]";
 	}
 }
 
@@ -164,21 +184,21 @@ Node.toString(...string ind, int lvl)
 	if(ind === undefined) ind = "";
 	if(lvl === undefined) lvl = 0;
 	switch(this.t){
-	case "module":
+	case ASTMODULE:
 		s = ind + "module;\n";
 		for(i = 0; i < this.stat.length; i++)
 			s += this.stat[i].toString(ind + "\t") + "\n";
 		s += ind + "endmodule";
 		return s;
-	case "sym":
+	case ASTSYM:
 		return this.sym.toString();
-	case "bin":
+	case ASTBIN:
 		t = optab[this.op];
 		s = this.n1.toString(ind, t.prec) + " " + this.op + " " + this.n2.toString(ind, t.prec + 1);
 		if(optab[this.op].prec < lvl)
 			s = "(" + s + ")";
 		return s;
-	case "concat":
+	case ASTCONCAT:
 		s = "{";
 		for(i = 0; i < this.l.length; i++){
 			if(i > 0) s += ", ";
@@ -186,16 +206,16 @@ Node.toString(...string ind, int lvl)
 		}
 		s += "}";
 		return s;
-	case "assign":
+	case ASTASSIGN:
 		return this.n1.toString() + " = " + this.n2.toString() + ";";
-	case "num":
+	case ASTNUM:
 		return this.num.toString();
-	case "cint":
+	case ASTCINT:
 		return this.numi.toString();
-	case "un":
+	case ASTUN:
 		return this.op + this.n1.toString();
 	default:
-		return this.t + "(...)";
+		return (string)this.t + "(...)";
 	}
 }
 
@@ -207,27 +227,27 @@ Node.toDebug(... string ind)
 
 	tab = "  ";
 	if(ind === undefined) ind = "";
-	s = ind + this.t;
+	s = ind + (string)this.t;
 	if(this.type !== undefined)
 		s += " [" + this.type.toDebug() + "]";
 	if(this.isconst)
 		s += " const";
 	s += "\n";
 	switch(this.t){
-	case "module":
+	case ASTMODULE:
 		for(i = 0; i < this.stat.length; i++)
 			s += this.stat[i].toDebug(ind + tab);
 		break;
-	case "un": s += this.n1.toDebug(ind + tab); break;
-	case "bin":
-	case "assign":
+	case ASTUN: s += this.n1.toDebug(ind + tab); break;
+	case ASTBIN:
+	case ASTASSIGN:
 		s += this.n1.toDebug(ind + tab);
 		s += this.n2.toDebug(ind + tab);
 		break;
-	case "num":
+	case ASTNUM:
 		s += ind + tab + this.num.toString() + "\n";
 		break;
-	case "cint":
+	case ASTCINT:
 		s += ind + tab + this.numi.toString() + "\n";
 	}
 	return s;
@@ -235,7 +255,9 @@ Node.toDebug(... string ind)
 
 struct Symbol {
 	string name;
-	string t;
+	enum SymbolType {
+		SYMPORT,
+	} t;
 	string dir;
 	int lineno;
 	bool portreg;
@@ -682,13 +704,13 @@ Parser.p_port_declaration()
 		range = null;
 	sym = this.expect("id").sym;
 	
-	sym.t = "port";
+	sym.t = SYMPORT;
 	sym.dir = dir;
 	sym.portreg = !wire;
 	if(range === null)
 		sym.type = signed ? sbittype : bittype;
 	else
-		sym.type = new Type("bitv", signed, range[1], range[0], null);
+		sym.type = new Type(TYPBITV, signed, range[1], range[0], null);
 }
 
 void
@@ -708,7 +730,7 @@ Parser.p_hier_identifier()
 	s = this.expect("id").sym;
 	if(s.t === undefined)
 		error(this.lineno, "undeclared '" + s.toString() + "'");
-	n = new Node(Node{t: "sym", sym: s, lineno: this.lineno});
+	n = new Node(Node{t: ASTSYM, sym: s, lineno: this.lineno});
 /*	while(this.got(".") !== null)
 		n = new Node(Node{t: "hier", n1: n, n2: this.expect("id").s});*/
 	
@@ -725,15 +747,15 @@ Parser.p_lvalue()
 		while(this.got(",") !== null)
 			l.push(this.p_lvalue());
 		this.expect("}");
-		return new Node(Node{t: "concat", l: l, lineno: this.lineno});
+		return new Node(Node{t: ASTCONCAT, l: l, lineno: this.lineno});
 	}else{
 		n = this.p_hier_identifier();
 		while(this.got("[") !== null){
 			a = this.p_expr();
 			if(this.got(":") !== null)
-				n = new Node(Node{t: "idx", n1: n, n2: a, n3: this.p_expr(), lineno: this.lineno});
+				n = new Node(Node{t: ASTIDX, n1: n, n2: a, n3: this.p_expr(), lineno: this.lineno});
 			else
-				n = new Node(Node{t: "idx", n1: n, n2: a, n3: null, lineno: this.lineno});
+				n = new Node(Node{t: ASTIDX, n1: n, n2: a, n3: null, lineno: this.lineno});
 			this.expect("]");
 		}
 		return n;
@@ -775,15 +797,15 @@ Parser.p_primary()
 		}
 		cn = numparse(this.lineno, null, b, c);
 		if(cn.sign && cn.v.length < 32 && cn.v.indexOf("x") < 0 && cn.v.indexOf("z") < 0)
-			return new Node(Node{t: "cint", numi: mptoi(cn.v), lineno: this.lineno});
-		return new Node(Node{t: "num", num: cn, lineno: this.lineno});
+			return new Node(Node{t: ASTCINT, numi: mptoi(cn.v), lineno: this.lineno});
+		return new Node(Node{t: ASTNUM, num: cn, lineno: this.lineno});
 	case "base":
 		b = t;
 		c = this.expect("num");
 		cn = numparse(this.lineno, null, b, c);
 		if(cn.sign && cn.v.length < 32 && cn.v.indexOf("x") < 0 && cn.v.indexOf("z") < 0)
-			return new Node(Node{t: "cint", numi: mptoi(cn.v), lineno: this.lineno});
-		return new Node(Node{t: "num", num: cn, lineno: this.lineno});
+			return new Node(Node{t: ASTCINT, numi: mptoi(cn.v), lineno: this.lineno});
+		return new Node(Node{t: ASTNUM, num: cn, lineno: this.lineno});
 	case "(":
 		n = this.p_expr();
 		this.expect(")");
@@ -791,7 +813,7 @@ Parser.p_primary()
 	default:
 		if(untab[t.t] !== undefined){
 			this.p_attributes();
-			return new Node(Node{t: "un", op: t.t, n1: this.p_primary(), lineno: this.lineno});
+			return new Node(Node{t: ASTUN, op: t.t, n1: this.p_primary(), lineno: this.lineno});
 		}
 		error(this.lineno, "unexpected " + t.t);
 	}
@@ -838,7 +860,7 @@ Parser.p_expr_core()
 	while(optab[t = this.peek().t] !== undefined){
 		while(op.length > 0 && optab[op[0]].prec >= optab[t].prec){
 			a = ex.shift();
-			ex[0] = new Node(Node{t: "bin", op: op.shift(), n1: ex[0], n2: a, lineno: this.lineno});
+			ex[0] = new Node(Node{t: ASTBIN, op: op.shift(), n1: ex[0], n2: a, lineno: this.lineno});
 		}
 		this.lex();
 		op.unshift(t);
@@ -847,7 +869,7 @@ Parser.p_expr_core()
 	}
 	while(op.length > 0){
 		a = ex.shift();
-		ex[0] = new Node(Node{t: "bin", op: op.shift(), n1: ex[0], n2: a, lineno: this.lineno});
+		ex[0] = new Node(Node{t: ASTBIN, op: op.shift(), n1: ex[0], n2: a, lineno: this.lineno});
 	}
 	return ex[0];
 }
@@ -863,14 +885,14 @@ Parser.p_expr()
 			q = this.p_expr();
 			this.expect("}");
 			this.expect("}");
-			return new Node(Node{t: "repl", n1: p, n2: q, lineno: this.lineno});
+			return new Node(Node{t: ASTREPL, n1: p, n2: q, lineno: this.lineno});
 		}else{
 			l = [p];
 			while(this.got(",") !== null)
 				l.push(this.p_expr());
 			while(this.got(",") !== null);
 			this.expect("}");
-			return new Node(Node{t: "concat", l: l, lineno: this.lineno});
+			return new Node(Node{t: ASTCONCAT, l: l, lineno: this.lineno});
 		}
 	}else{
 		p = this.p_expr_core();
@@ -878,7 +900,7 @@ Parser.p_expr()
 			q = this.p_expr();
 			this.expect(":");
 			r = this.p_expr();
-			return new Node(Node{t: "tern", n1: p, n2: q, n3: r, lineno: this.lineno});
+			return new Node(Node{t: ASTTERN, n1: p, n2: q, n3: r, lineno: this.lineno});
 		}else
 			return p;
 	}
@@ -893,7 +915,7 @@ Parser.p_assignment()
 	l = this.p_lvalue();
 	this.expect("=");
 	r = this.p_expr();
-	return new Node(Node{t: "assign", n1: l, n2: r, lineno: this.lineno});
+	return new Node(Node{t: ASTASSIGN, n1: l, n2: r, lineno: this.lineno});
 }
 
 Node
@@ -941,7 +963,7 @@ Parser.p_module()
 		r = [];
 		while(this.got("kw:endmodule") === null)
 			r.push.apply(r, this.p_module_item());
-		n = new Node(Node{t: "module", sym: s, stat: r, lineno: lno});
+		n = new Node(Node{t: ASTMODULE, sym: s, stat: r, lineno: lno});
 	}finally{
 		this.scopeup();
 	}

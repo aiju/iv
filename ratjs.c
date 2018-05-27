@@ -38,8 +38,9 @@ struct Type {
 		TYPARRAY,
 		TYPMAP,
 		TYPVOID,
+		TYPENUM,
 	} t;
-	Type *ret;
+	Type *ret, *idx;
 	NodeList pl;
 	SymTab st;
 	char *label;
@@ -68,6 +69,7 @@ struct Symbol {
 		SYMTYPE,
 		SYMFUNC,
 		SYMDUMMY,
+		SYMENUMV,
 	} t;
 	char *name;
 	Node *def;
@@ -121,6 +123,7 @@ struct Node {
 		ASTTHROW,
 		ASTFORIN,
 		ASTTRY,
+		ASTCAST,
 	} t;
 	enum {
 		OPINVAL,
@@ -165,6 +168,7 @@ struct Node {
 	SymTab *st;
 	int i;
 	Type *type;
+	Type *typearg;
 	Line;
 };
 
@@ -210,6 +214,7 @@ astfmt(Fmt *f)
 		[ASTFORIN] "ASTFORIN",
 		[ASTTRY] "ASTTRY",
 		[ASTTHROW] "ASTTHROW",
+		[ASTCAST] "ASTCAST",
 	};
 	
 	n = va_arg(f->args, int);
@@ -229,6 +234,7 @@ symtfmt(Fmt *f)
 		[SYMTYPE] "type",
 		[SYMFUNC] "function",
 		[SYMDUMMY] "dummy variable",
+		[SYMENUMV] "enum value",
 	};
 	
 	n = va_arg(f->args, int);
@@ -484,6 +490,10 @@ node(Line *l, int t, ...)
 		n->n3 = va_arg(va, Node *);
 		n->sym = va_arg(va, Symbol *);
 		break;
+	case ASTCAST:
+		n->typearg = va_arg(va, Type *);
+		n->n1 = va_arg(va, Node *);
+		break;
 	default:
 		sysfatal("node: unimplemented %α", t);
 	}
@@ -512,7 +522,10 @@ type(int ty, ...)
 		t->ret = va_arg(va, Type *);
 		break;
 	case TYPARRAY:
+		t->ret = va_arg(va, Type *);
+		break;
 	case TYPMAP:
+		t->idx = va_arg(va, Type *);
 		t->ret = va_arg(va, Type *);
 		break;
 	}
@@ -521,6 +534,27 @@ type(int ty, ...)
 }
 
 #pragma varargck type "τ" Type *
+void
+enumprint(Fmt *f, Type *t)
+{
+	Symbol *s;
+	int room, first;
+	
+	room = 16;
+	first = 1;
+	fmtprint(f, "enum {");
+	for(s = t->st.list; s != nil; s = s->next){
+		if(strlen(s->name) + (first ? 0 : 2) > room)
+			break;
+		fmtprint(f, "%s%s", first ? "" : ", ", s->name);
+		room -= strlen(s->name) + (first ? 0 : 2);
+		first = 0;
+	}
+	if(s != nil)
+		fmtprint(f, "%s...", first ? "" : ", ");
+	fmtprint(f, "}");
+}
+
 int
 typefmt(Fmt *f)
 {
@@ -557,7 +591,10 @@ typefmt(Fmt *f)
 	case TYPARRAY:
 		return fmtprint(f, "%τ[]", t->ret);
 	case TYPMAP:
-		return fmtprint(f, "%τ[string]", t->ret);
+		return fmtprint(f, "%τ[%τ]", t->ret, t->idx);
+	case TYPENUM:
+		enumprint(f, t);
+		return 0;
 	default:
 		return fmtprint(f, "??? (%d)", t->t);
 	}
@@ -681,6 +718,7 @@ enum {
 	TTRY,
 	TCATCH,
 	TFINALLY,
+	TENUM,
 	TEOF,
 };
 char idbuf[512];
@@ -752,6 +790,7 @@ tokfmt(Fmt *f)
 		[TTRY-TINT] "TTRY",
 		[TCATCH-TINT] "TCATCH",
 		[TFINALLY-TINT] "TFINALLY",
+		[TENUM-TINT] "TENUM",
 	};
 	
 	n = va_arg(f->args, int);
@@ -796,6 +835,7 @@ Keyword kwtab[] = {
 	"try", TTRY,
 	"catch", TCATCH,
 	"finally", TFINALLY,
+	"enum", TENUM,
 };
 Keyword optab[] = {
 	"&=", TANDEQ,
@@ -1045,6 +1085,23 @@ goteof(int x)
 	return 0;
 }
 
+int
+gotany(int x, ...)
+{
+	int t, i;
+	va_list va;
+	
+	t = peek();
+	if(t == x) return lex();
+	va_start(va, x);
+	while(i = va_arg(va, int), i != 0)
+		if(t == i)
+			return lex();
+	va_end(va);
+	return 0;
+}
+
+
 void
 expect(int x)
 {
@@ -1159,11 +1216,58 @@ p_new(void)
 	return n;
 }
 
+int
+gottype(void)
+{
+	return gotany(TVAR, TINT, TSTRING, TBOOL, TVOID, TTYPE, 0);
+}
+
+Type *
+p_enum(void)
+{
+	Type *t;
+
+	t = type(TYPENUM);
+	if(!got('{')){
+		expectany(TTYPE, TSYM, 0);
+		decl(scope, SYMTYPE, lexsym, t, nil);
+		t->label = strdup(idbuf);
+		expect('{');
+	}
+	while(!goteof('}')){
+		expectany(TTYPE, TSYM, 0);
+		decl(&t->st, SYMENUMV, lexsym, t, nil);
+		decl(scope, SYMENUMV, lexsym, t, nil);
+		if(goteof('}')) break;
+		expect(',');
+	}
+	return t;
+}
+
+Type *
+p_type(int t)
+{
+	switch(t){
+	case TVAR: return type(TYPVAR);
+	case TINT: return type(TYPINT);
+	case TSTRING: return type(TYPSTRING);
+	case TBOOL: return type(TYPBOOL);
+	case TVOID: return type(TYPVOID);
+	case TTYPE: return lexsym->type;
+	case TENUM: return p_enum();
+	default:
+		error(nil, "unexpected %T, expected type", t);
+		return nil;
+	}
+}
+
 Node *
 p_primary(void)
 {
 	Node *n;
+	Symbol *s;
 	int t;
+	Type *ty;
 
 	switch(t = lex()){
 	case TTHIS: n = node(nil, ASTTHIS); break;
@@ -1176,10 +1280,20 @@ p_primary(void)
 	case '!': n = node(nil, ASTUN, OPLNOT, p_primary()); break;
 	case TPP: n = node(nil, ASTINDE, 0, p_primary()); break;
 	case TMM: n = node(nil, ASTINDE, 1, p_primary()); break;
-	case '(': n = p_expr(1); expect(')'); break;
+	case '(':
+		if(t = gottype()){
+			ty = p_type(t);
+			if(ty == nil) ty = type(TYPVAR);
+			expect(')');
+			n = node(nil, ASTCAST, ty, p_primary());
+		}else{
+			n = p_expr(1);
+			expect(')');
+		}
+		break;
 	case '[': n = node(nil, ASTARRAY, p_exprl(']')); break;
 	case '{': n = p_object(nil); break;
-	case TTYPE: expect('{'); n = p_object(lexsym); break;
+	case TTYPE: s = lexsym; expect('{'); n = p_object(s); break;
 	case TNEW: n = p_new(); break;
 	default:
 		error(nil, "unexpected %T in expression", t);
@@ -1252,21 +1366,6 @@ error:
 	return n;
 giveup:
 	free(st.s);
-	return nil;
-}
-
-Type *
-p_type(int t)
-{
-	switch(t){
-	case TVAR: return type(TYPVAR);
-	case TINT: return type(TYPINT);
-	case TSTRING: return type(TYPSTRING);
-	case TBOOL: return type(TYPBOOL);
-	case TVOID: return type(TYPVOID);
-	case TTYPE: return lexsym->type;
-	default: error(nil, "unexpected %T, expected type", t);
-	}
 	return nil;
 }
 
@@ -1352,8 +1451,8 @@ dot:
 			break;
 		case '[':
 			lex();
-			if(got(TSTRING))
-				t = type(TYPMAP, t);
+			if(to = gottype())
+				t = type(TYPMAP, p_type(to), t);
 			else
 				t = type(TYPARRAY, t);
 			expect(']');
@@ -1453,8 +1552,10 @@ p_stat(void)
 		scopeup();
 		return a;
 	case TRETURN:
-		if(!got(';'))
+		if(!got(';')){
 			a = p_expr(1);
+			expect(';');
+		}
 		return node(nil, ASTRETURN, a);
 	case TIF:
 		expect('(');
@@ -1559,8 +1660,9 @@ p_stat(void)
 	case TEXTERN:
 		gotextern = 1;
 		t = lex();
-	case TVAR: case TINT: case TSTRING: case TBOOL: case TVOID: case TTYPE:
+	case TVAR: case TINT: case TSTRING: case TBOOL: case TVOID: case TTYPE: case TENUM:
 		ty = p_type(t);
+		if(got(';')) return nil;
 		p_spec(ty, &sym, &par, &tz);
 		if(got('{'))
 			return p_function(sym, par, tz);
@@ -1576,7 +1678,7 @@ p_stat(void)
 				if(par != nil)
 					decl(&par->st, SYMVAR, sym, tz, a);
 				else{
-					decl(scope, SYMVAR, sym, tz, a);
+					sym = decl(scope, SYMVAR, sym, tz, a);
 					if(!gotextern)
 						nl = nladd(nl, 1, node(nil, ASTDECL, sym));
 				}
@@ -1651,7 +1753,7 @@ opfmt(Fmt *f)
 	return fmtprint(f, "%s", bintab[n].str);
 }
 
-extern void output(Fmt *, Node *, int);
+void output(Fmt *, Node *, int, int);
 
 int
 exprfmt(Fmt *f)
@@ -1666,7 +1768,10 @@ exprfmt(Fmt *f)
 	assert(n != nil);
 	switch(n->t){
 	case ASTSYM:
-		fmtprint(f, "%s", n->sym->name);
+		if(n->sym->t == SYMENUMV)
+			fmtprint(f, "\"%s\"", n->sym->name);
+		else
+			fmtprint(f, "%s", n->sym->name);
 		break;
 	case ASTNUM:
 		fmtprint(f, "%s", n->str);
@@ -1703,7 +1808,7 @@ exprfmt(Fmt *f)
 		if(!terse){
 			fmtprint(f, " {\n");
 			for(i = 0; i < n->nl.n; i++)
-				output(f, n->nl.a[i], 0);
+				output(f, n->nl.a[i], 0, 0);
 			fmtprint(f, "}");
 		}
 		break;
@@ -1758,6 +1863,16 @@ exprfmt(Fmt *f)
 	case ASTIDX:
 		fmtprint(f, "%.19ε[%ε]", n->n1, n->n2);
 		break;
+	case ASTCAST:
+		if(n->typearg->t == TYPSTRING || n->typearg->t == TYPENUM)
+			fmtprint(f, "String(%ε)", n->n1);
+		else if(n->typearg->t == TYPINT)
+			fmtprint(f, "Number(%ε)", n->n1);
+		else if(n->typearg->t == TYPVAR)
+			fmtprint(f, "%.*ε", env, n->n1);
+		else
+			fmtprint(f, "(/* %τ */ %ε)", n->typearg, n->n1);
+		break;
 	default:
 		sysfatal("exprfmt: unimplemented %α", n->t);
 	}
@@ -1785,7 +1900,7 @@ typeeq(Type *l, Type *r)
 	case TYPARRAY:
 		return typeeq(l->ret, r->ret);
 	case TYPMAP:
-		return typeeq(l->ret, r->ret);
+		return typeeq(l->idx, r->idx) && typeeq(l->ret, r->ret);
 	default:
 		return 1;
 	}
@@ -1874,9 +1989,26 @@ assok(Type *l, Type *r)
 		return 1;
 	if(l->t == TYPARRAY && r->t == TYPARRAY)
 		return assok(l->ret, r->ret);
-	if(l->t == TYPMAP && r->t == TYPMAP)
-		return assok(l->ret, r->ret);
+	if(l->t == TYPMAP && r->t == TYPMAP){
+		if(!assok(l->ret, r->ret)) return 0;
+		if(typeeq(l->idx, r->idx)) return 1;
+		if(l->idx->t == TYPSTRING && r->idx->t == TYPENUM) return 1;
+		if(l->idx->t == TYPENUM && r->idx->t == TYPSTRING) return 1;
+		return 0;
+	}
 	return typeeq(l, r);
+}
+
+int
+assfix(Type *l, Node **r)
+{
+	if(typeeq(l, (*r)->type))
+		return 1;
+	if(!assok(l, (*r)->type))
+		return 0;
+	*r = node(*r, ASTCAST, l, *r);
+	(*r)->type = l;
+	return 1;
 }
 
 Type *
@@ -1914,6 +2046,11 @@ idxtype(Line *lno, Type *a, Type *i)
 {
 	int numok, strok;
 	
+	if(a->t == TYPMAP){
+		if(!assok(a->idx, i))
+			error(lno, "%τ as index into %τ", i, a);
+		return a->ret;
+	}
 	numok = 0;
 	strok = 0;
 	switch(a->t){
@@ -1942,8 +2079,6 @@ idxtype(Line *lno, Type *a, Type *i)
 		return a->ret;
 	case TYPSTRING:
 		return type(TYPSTRING);
-	case TYPMAP:
-		return a->ret;
 	default:
 		error(lno, "index into %τ", a);
 		return type(TYPVAR);
@@ -1979,7 +2114,7 @@ typecheck(Node *n, Node *func)
 				s = getsym(&t->st, 0, n->nl.a[i]->str);
 				if(s->t == SYMNONE)
 					error(n->nl.a[i], "no such field '%s' in type %τ", s->name, t);
-				else if(!assok(s->type, n->nl.a[i]->n1->type))
+				else if(!assfix(s->type, &n->nl.a[i]->n1))
 					error(n->nl.a[i]->n1, "%τ instead of %τ for field %s of %τ", n->nl.a[i]->n1->type, s->type, s->name, t);
 			}
 			n->type = t;
@@ -1992,7 +2127,7 @@ typecheck(Node *n, Node *func)
 					t = type(TYPVAR);
 			}
 			if(t == nil) t = type(TYPVAR);
-			n->type = type(TYPMAP, t);
+			n->type = type(TYPMAP, type(TYPSTRING), t);
 		}
 		break;
 	case ASTSWITCH:
@@ -2018,7 +2153,7 @@ typecheck(Node *n, Node *func)
 	case ASTDEFAULT: error(n, "lone default statement"); break;
 	case ASTDECL:
 		typecheck(n->sym->def, func);
-		if(n->sym->def != nil && !assok(n->sym->def->type, n->sym->type))
+		if(n->sym->def != nil && !assfix(n->sym->type, &n->sym->def))
 			error(n, "illegal assignment of %τ to %τ", n->sym->def->type, n->sym->type);
 		break;
 	case ASTLABEL:
@@ -2036,13 +2171,11 @@ typecheck(Node *n, Node *func)
 	case ASTASS:
 		typecheck(n->n1, func);
 		typecheck(n->n2, func);
-		if(n->op == OPINVAL)
-			t = n->n2->type;
-		else
-			t = optype(n, n->op, n->n1->type, n->n2->type);
-		if(!assok(n->n1->type, t))
-			error(n, "illegal assignment of %τ to %τ", t, n->n1->type);
-		n->type = t;
+		if(n->op != OPINVAL)
+			optype(n, n->op, n->n1->type, n->n2->type);
+		if(!assfix(n->n1->type, &n->n2))
+			error(n, "illegal assignment of %τ to %τ", n->n2->type, n->n1->type);
+		n->type = n->n1->type;
 		break;
 	case ASTOP:
 		typecheck(n->n1, func);
@@ -2061,6 +2194,7 @@ typecheck(Node *n, Node *func)
 			error(n, "'%s' undeclared", n->sym->name);
 			break;
 		case SYMVAR:
+		case SYMENUMV:
 			if((n->flags & ASTFUNDECL) != 0)
 				goto undecl;
 			break;
@@ -2087,7 +2221,7 @@ typecheck(Node *n, Node *func)
 		else if(n->n1 == nil){
 			if(func->type->ret->t != TYPVOID && func->type->ret->t != TYPVAR)
 				error(n, "null return in function returning %τ", func->type->ret);
-		}else if(!assok(func->type->ret, n->n1->type))
+		}else if(!assfix(func->type->ret, &n->n1))
 			error(n, "return of %τ does not match return type %τ", n->n1->type, func->type->ret);
 		break;
 	case ASTDOT:
@@ -2172,27 +2306,42 @@ typecheck(Node *n, Node *func)
 		typecheck(n->n2, func);
 		typecheck(n->n3, func);
 		break;
+	case ASTCAST:
+		typecheck(n->n1, func);
+		n->type = n->typearg;
+		break;
 	default:
 		sysfatal("typecheck: unimplemented %α", n->t);
 	}
 }
 
 void
-outblock(Fmt *f, Node *n, int ind, int dowhile)
+outblock(Fmt *f, Node *n, int ind, int dowhile, int force)
 {
 	int i;
 
 	if(n == nil)
-		fmtprint(f, "\n%I;\n", ind+1);
+		if(force){
+			fmtprint(f, "{\n%I}%s", ind+1, dowhile?"":"\n");
+			return;
+		}else
+			fmtprint(f, "\n%I;\n", ind+1);
 	else if(n->t == ASTBLOCK){
 		fmtprint(f, "{\n");
 		for(i = 0; i < n->nl.n; i++)
-			output(f, n->nl.a[i], ind + 1);
+			output(f, n->nl.a[i], ind + 1, ind + 1);
 		fmtprint(f, "%I}%s", ind, dowhile?"":"\n");
 		return;
 	}else{
-		fmtprint(f, "\n");
-		output(f, n, ind + 1);
+		if(force){
+			fmtprint(f, "{\n");
+			output(f, n, ind + 1, ind + 1);
+			fmtprint(f, "%I}%s", ind, dowhile?"":"\n");
+			return;
+		}else{
+			fmtprint(f, "\n");
+			output(f, n, ind + 1, ind + 1);
+		}
 	}
 	if(dowhile) fmtprint(f, "%I", ind);
 }
@@ -2217,7 +2366,7 @@ fixnilname(SymTab *st, char *name)
 }
 
 void
-output(Fmt *f, Node *n, int ind)
+output(Fmt *f, Node *n, int ind, int ind0)
 {
 	int i;
 
@@ -2225,123 +2374,124 @@ output(Fmt *f, Node *n, int ind)
 	switch(n->t){
 	case ASTFUNC:
 		if(n->sym == nil)
-			fmtprint(f, "%I%ε;\n", ind, n);
+			fmtprint(f, "%I%ε;\n", ind0, n);
 		else{
 			if(n->par != nil && n->par != n->sym->type)
-				fmtprint(f, "%I%s.prototype.%s = function(", ind, n->par->label, n->sym->name);
+				fmtprint(f, "%I%s.prototype.%s = function(", ind0, n->par->label, n->sym->name);
 			else
-				fmtprint(f, "%Ifunction\n%I%s(", ind, ind, n->sym->name);
+				fmtprint(f, "%Ifunction\n%I%s(", ind0, ind, n->sym->name);
 			for(i = 0; i < n->type->pl.n; i++)
 				fmtprint(f, "%s%s", i>0?", ":"", fixnilname(n->st, n->type->pl.a[i]->str));
 			fmtprint(f, ") //%τ\n%I{\n", n->sym->type, ind);
 			for(i = 0; i < n->nl.n; i++)
-				output(f, n->nl.a[i], ind + 1);
+				output(f, n->nl.a[i], ind + 1, ind + 1);
 			fmtprint(f, "%I}\n", ind);
 		}
 		break;
 	case ASTRETURN:
 		if(n->n1 == nil)
-			fmtprint(f, "%Ireturn;\n", ind);
+			fmtprint(f, "%Ireturn;\n", ind0);
 		else
-			fmtprint(f, "%Ireturn %ε;\n", ind, n->n1);
+			fmtprint(f, "%Ireturn %ε;\n", ind0, n->n1);
 		break;
 	case ASTIF:
-		fmtprint(f, "%Iif(%ε)", ind, n->n1);
-		outblock(f, n->n2, ind, 0);
+		fmtprint(f, "%Iif(%ε)", ind0, n->n1);
+		outblock(f, n->n2, ind, n->n3 != nil, n->n2 != nil && n->n2->t == ASTIF);
 		if(n->n3 != nil){
-			fmtprint(f, "%Ielse", ind);
-			outblock(f, n->n3, ind, 0);
+			fmtprint(f, "else");
+			if(n->n3->t == ASTIF){
+				fmtrune(f, ' ');
+				output(f, n->n3, ind, 0);
+			}else
+				outblock(f, n->n3, ind, 0, 0);
 		}
 		break;
 	case ASTWHILE:
-		fmtprint(f, "%Iwhile(%ε)", ind, n->n1);
-		outblock(f, n->n2, ind, 0);
+		fmtprint(f, "%Iwhile(%ε)", ind0, n->n1);
+		outblock(f, n->n2, ind, 0, 0);
 		break;
 	case ASTDOWHILE:
-		fmtprint(f, "%Ido", ind);
-		outblock(f, n->n2, ind, 1);
+		fmtprint(f, "%Ido", ind0);
+		outblock(f, n->n2, ind, 1, 0);
 		fmtprint(f, "while(%ε);\n", n->n1);
 		break;
 	case ASTFOR:
-		fmtprint(f, "%Ifor(", ind);
+		fmtprint(f, "%Ifor(", ind0);
 		if(n->n1 != nil) fmtprint(f, "%ε", n->n1);
 		fmtprint(f, "; ");
 		if(n->n2 != nil) fmtprint(f, "%ε", n->n2);
 		fmtprint(f, "; ");
 		if(n->n3 != nil) fmtprint(f, "%ε", n->n3);
 		fmtprint(f, ")");
-		outblock(f, n->n4, ind, 0);
+		outblock(f, n->n4, ind, 0, 0);
 		break;
 	case ASTFORIN:
-		fmtprint(f, "%Ifor(%ε in %ε)", ind, n->n1, n->n2);
-		outblock(f, n->n3, ind, 0);
+		fmtprint(f, "%Ifor(%ε in %ε)", ind0, n->n1, n->n2);
+		outblock(f, n->n3, ind, 0, 0);
 		break;
 	case ASTLABEL:
-		fmtprint(f, "%I%s:\n", ind, n->sym->name);
+		fmtprint(f, "%I%s:\n", ind0, n->sym->name);
 		break;
 	case ASTBREAK:
 		if(n->sym != nil)
-			fmtprint(f, "%Ibreak %s;\n", ind, n->sym->name);
+			fmtprint(f, "%Ibreak %s;\n", ind0, n->sym->name);
 		else
-			fmtprint(f, "%Ibreak;\n", ind);
+			fmtprint(f, "%Ibreak;\n", ind0);
 		break;
 	case ASTCONTINUE:
 		if(n->sym != nil)
-			fmtprint(f, "%Icontinue %s;\n", ind, n->sym->name);
+			fmtprint(f, "%Icontinue %s;\n", ind0, n->sym->name);
 		else
-			fmtprint(f, "%Icontinue;\n", ind);
+			fmtprint(f, "%Icontinue;\n", ind0);
 		break;
 	case ASTDECL:
-		fmtprint(f, "%Ivar %s", ind, n->sym->name);
+		fmtprint(f, "%Ivar %s", ind0, n->sym->name);
 		if(n->sym->def != nil)
 			fmtprint(f, " = %.2ε", n->sym->def);
 		fmtprint(f, "; // %τ\n", n->sym->type);
 		break;
 	case ASTDECLS:
 		for(i = 0; i < n->nl.n; i++)
-			output(f, n->nl.a[i], ind);
+			output(f, n->nl.a[i], ind, ind);
 		break;
 	case ASTBLOCK:
-		fmtprint(f, "%I{\n", ind);
+		fmtprint(f, "%I{\n", ind0);
 		for(i = 0; i < n->nl.n; i++)
-			output(f, n->nl.a[i], ind + 1);
+			output(f, n->nl.a[i], ind + 1, ind + 1);
 		fmtprint(f, "%I}\n", ind);
 		break;
 	case ASTSWITCH:
-		fmtprint(f, "%Iswitch(%ε){\n", ind, n->n1);
+		fmtprint(f, "%Iswitch(%ε){\n", ind0, n->n1);
 		for(i = 0; i < n->nl.n; i++)
-			output(f, n->nl.a[i], ind + 1);
+			output(f, n->nl.a[i], ind + 1, ind + 1);
 		fmtprint(f, "%I}\n", ind);
 		break;
 	case ASTCASE:
-		fmtprint(f, "%Icase %ε:\n", ind-1, n->n1);
+		fmtprint(f, "%Icase %ε:\n", ind0-1, n->n1);
 		break;
 	case ASTTHROW:
-		fmtprint(f, "%Ithrow %ε;\n", ind, n->n1);
+		fmtprint(f, "%Ithrow %ε;\n", ind0, n->n1);
 		break;
 	case ASTDEFAULT:
-		fmtprint(f, "%Idefault:\n", ind-1);
+		fmtprint(f, "%Idefault:\n", ind0-1);
 		break;
 	case ASTTRY:
-		fmtprint(f, "%Itry{\n", ind);
-		output(f, n->n1, ind+1);
-		fmtprint(f, "%I}\n", ind);
+		fmtprint(f, "%Itry", ind0);
+		outblock(f, n->n1, ind, n->n2 != nil || n->n3 != nil, 1);
 		if(n->n2 != nil){
 			if(n->sym != nil)
-				fmtprint(f, "%Icatch(%s){\n", ind, n->sym->name);
+				fmtprint(f, "catch(%s)", n->sym->name);
 			else
-				fmtprint(f, "%Icatch{\n", ind);
-			output(f, n->n2, ind+1);
-			fmtprint(f, "%I}\n", ind);
+				fmtprint(f, "catch");
+			outblock(f, n->n2, ind, n->n3 != nil, 1);
 		}
 		if(n->n3 != nil){
-			fmtprint(f, "%Ifinally{\n", ind);
-			output(f, n->n3, ind+1);
-			fmtprint(f, "%I}\n", ind);
+			fmtprint(f, "finally");
+			outblock(f, n->n3, ind, 0, 1);
 		}
 		break;
 	default:
-		fmtprint(f, "%I%ε;\n", ind, n);
+		fmtprint(f, "%I%ε;\n", ind0, n);
 		break;
 	}
 }
@@ -2383,7 +2533,7 @@ main(int argc, char **argv)
 		fmtfdinit(&f, 1, buf, sizeof(buf));
 		fmtprint(&f, "\"use strict\";\n\n");
 		for(i = 0; i < prog.n; i++)
-			output(&f, prog.a[i], 0);
+			output(&f, prog.a[i], 0, 0);
 		fmtfdflush(&f);
 		exits(nil);
 	}else
