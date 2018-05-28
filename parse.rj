@@ -33,263 +33,6 @@ bool kwtab[string] = {
 	"xor": true
 };
 
-struct Symbol;
-struct Type;
-struct Const;
-
-struct Node {
-	enum NodeType {
-		ASTMODULE,
-		ASTASSIGN,
-		ASTSYM,
-		ASTBIN,
-		ASTCINT,
-		ASTCONCAT,
-		ASTNUM,
-		ASTUN,
-		ASTIDX,
-		ASTREPL,
-		ASTTERN,
-	} t;
-	Type type;
-	bool isconst;
-	Node stat[];
-	string op;
-	Node n1, n2, n3;
-	Symbol sym;
-	Node l[];
-	Const num;
-	int numi;
-	int lineno;
-};
-
-struct Type {
-	enum TypeType {
-		TYPBIT,
-		TYPBITS,
-		TYPBITV,
-		TYPUNSZ,
-		TYPEVENT,
-		TYPREAL,
-		TYPMEM
-	} t;
-	bool sign;
-	Node lo;
-	Node hi;
-	Node sz;
-	Type elem;
-};
-
-struct Token {
-	string t;
-	string str;
-	Symbol sym;
-	int base;
-	bool sign;
-};
-
-void
-Type(TypeType t, ... bool sign, Node lo, Node hi, Type elem)
-{
-	this.t = t;
-	this.sign = sign;
-	if(t == TYPBITV){
-		this.lo = lo;
-		this.hi = hi;
-	}else{
-		this.lo = null;
-		this.hi = null;
-	}
-	if(t == TYPBITV)
-		this.sz = new Node(Node{t: ASTBIN, op: "+", n1: new Node(Node{t: ASTBIN, op: "-", n1: this.hi, n2: this.lo}), n2: new Node(Node{t: ASTCINT, numi: 1})});
-	else if(t == TYPBITS)
-		this.sz = lo;
-	else if(t == TYPBIT)
-		this.sz = new Node(Node{t: ASTCINT, numi: 1});
-	else
-		this.sz = null;
-	this.elem = elem;
-}
-
-Type bittype = new Type(TYPBIT, false);
-Type sbittype = new Type(TYPBIT, true);
-Type eventtype = new Type(TYPEVENT, false);
-Type unsztype = new Type(TYPUNSZ, false);
-Type sunsztype = new Type(TYPUNSZ, true);
-Type realtype = new Type(TYPREAL);
-
-string
-Type.toDebug()
-{
-	switch(this.t){
-	case TYPBIT:
-	case TYPUNSZ:
-		return (string)this.t + (this.sign ? " signed" : "");
-	case TYPBITV:
-		return (string)this.t + (this.sign ? " signed [" : " [") + this.hi.toString() + ":" + this.lo.toString() + "]";
-	case TYPBITS:
-		return (string)this.t + (this.sign ? " signed [" : " [") + this.sz.toString() + "]";
-	}
-}
-
-struct Const {
-	string v;
-	int sz;
-	bool sign;
-};
-
-void
-Const(string v, int sz, bool sign)
-{
-	this.v = v;
-	this.sz = sz;
-	this.sign = sign;
-}
-
-string
-Const.toString()
-{
-	string s;
-	int i;
-
-	s = "";
-	if(this.sz !== null)
-		s += this.sz.toString();
-	if(this.sign)
-		s += "'sb";
-	else
-		s += "'b";
-	for(i = 0; i < this.v.length; i++)
-		s += this.v.charAt(this.v.length - 1 - i);
-	return s;
-}
-
-function
-Node(Node attr)
-{
-	string i;
-
-	for(i in attr)
-		this[i] = attr[i];
-	this.isconst = false;
-}
-
-string
-Node.toString(...string ind, int lvl)
-{
-	string s;
-	var t;
-	int i;
-
-	if(ind === undefined) ind = "";
-	if(lvl === undefined) lvl = 0;
-	switch(this.t){
-	case ASTMODULE:
-		s = ind + "module;\n";
-		for(i = 0; i < this.stat.length; i++)
-			s += this.stat[i].toString(ind + "\t") + "\n";
-		s += ind + "endmodule";
-		return s;
-	case ASTSYM:
-		return this.sym.toString();
-	case ASTBIN:
-		t = optab[this.op];
-		s = this.n1.toString(ind, t.prec) + " " + this.op + " " + this.n2.toString(ind, t.prec + 1);
-		if(optab[this.op].prec < lvl)
-			s = "(" + s + ")";
-		return s;
-	case ASTCONCAT:
-		s = "{";
-		for(i = 0; i < this.l.length; i++){
-			if(i > 0) s += ", ";
-			s += this.l[i].toString(ind, 0);
-		}
-		s += "}";
-		return s;
-	case ASTASSIGN:
-		return this.n1.toString() + " = " + this.n2.toString() + ";";
-	case ASTNUM:
-		return this.num.toString();
-	case ASTCINT:
-		return this.numi.toString();
-	case ASTUN:
-		return this.op + this.n1.toString();
-	default:
-		return (string)this.t + "(...)";
-	}
-}
-
-string
-Node.toDebug(... string ind)
-{
-	int i;
-	string s, tab;
-
-	tab = "  ";
-	if(ind === undefined) ind = "";
-	s = ind + (string)this.t;
-	if(this.type !== undefined)
-		s += " [" + this.type.toDebug() + "]";
-	if(this.isconst)
-		s += " const";
-	s += "\n";
-	switch(this.t){
-	case ASTMODULE:
-		for(i = 0; i < this.stat.length; i++)
-			s += this.stat[i].toDebug(ind + tab);
-		break;
-	case ASTUN: s += this.n1.toDebug(ind + tab); break;
-	case ASTBIN:
-	case ASTASSIGN:
-		s += this.n1.toDebug(ind + tab);
-		s += this.n2.toDebug(ind + tab);
-		break;
-	case ASTNUM:
-		s += ind + tab + this.num.toString() + "\n";
-		break;
-	case ASTCINT:
-		s += ind + tab + this.numi.toString() + "\n";
-	}
-	return s;
-}
-
-struct Symbol {
-	string name;
-	enum SymbolType {
-		SYMPORT,
-	} t;
-	string dir;
-	int lineno;
-	bool portreg;
-	Type type;
-};
-
-void
-Symbol(string name)
-{
-	this.name = name;
-}
-
-string
-Symbol.toString()
-{
-	return this.name;
-}
-
-struct Scope {
-	Scope up;
-	Symbol sym;
-	Symbol tab[string];
-};
-
-function
-Scope(Scope up, Symbol sym)
-{
-	this.up = up;
-	this.sym = sym;
-	this.tab = {};
-}
-
 struct Parser {
 	string s;
 	int idx;
@@ -299,6 +42,7 @@ struct Parser {
 	Scope scope;
 	Token nextnum;
 	string str;
+	Symbol curmod;
 };
 
 function
@@ -314,14 +58,19 @@ Parser(s)
 }
 
 Symbol
-Parser.getsym(string name)
+getsym(Scope scope, string name, bool hier)
 {
 	Scope sc;
+	Symbol s;
 	
-	for(sc = this.scope; sc !== null; sc = sc.up)
-		if(sc.tab[name] !== undefined && sc.tab[name].t !== undefined)
-			return sc.tab[name];
-	return this.scope.tab[name] = new Symbol(name);
+	if(hier)
+		for(sc = scope; sc !== null; sc = sc.up)
+			if(sc.tab[name] !== undefined && sc.tab[name].t !== null)
+				return sc.tab[name];
+	s = scope.tab[name];
+	if(s === undefined)
+		s = scope.tab[name] = new Symbol(name);
+	return s;
 }
 
 void
@@ -334,6 +83,19 @@ void
 Parser.scopeup()
 {
 	this.scope = this.scope.up;
+}
+
+Symbol
+decl(int lineno, Scope scope, SymbolType t, Symbol s, Type typ, Node def)
+{
+	s = getsym(scope, s.name, false);
+	if(s.t !== SYMNONE)
+		error(lineno, "'" + (string)s + "' redeclared");
+	s.t = t;
+	s.def = def;
+	s.type = typ;
+	s.lineno = lineno;
+	return s;
 }
 
 function
@@ -473,7 +235,8 @@ string longop[string] = {
 	"||": "||",
 	"~&": "~&",
 	"~^": "~^",
-	"~|": "~|"
+	"~|": "~|",
+	"@*": "@*",
 };
 bool opchar[string] = {
 	"!": true,
@@ -558,7 +321,7 @@ Parser.lex()
 			s = "";
 			while(c = this.getc(), c != "" && !isspace(c))
 				s += c;
-			return Token{t: "id", sym: this.getsym(s)};
+			return Token{t: "id", sym: getsym(this.scope, s, true)};
 		}
 		if(isdigit(c) || this.nextnum && (isident(c) || c == "?")){
 			s = c;
@@ -577,7 +340,7 @@ Parser.lex()
 			this.ungetc();
 			if(kwtab[s])
 				return Token{t: "kw:" + s};
-			return Token{t: "id", sym: this.getsym(s)};
+			return Token{t: "id", sym: getsym(this.scope, s, true)};
 		}
 		if(c == "'"){
 			s = c;
@@ -662,7 +425,7 @@ Parser.got(string tt)
 Token
 Parser.gotany(bool tt[string])
 {
-	if(tt[this.peek().t] !== null)
+	if(tt[this.peek().t] === true)
 		return this.lex();
 	return null;
 }
@@ -677,7 +440,8 @@ Parser.p_range[]()
 {
 	Node a, b;
 
-	this.expect("[");
+	if(this.got("[") === null)
+		return null;
 	a = this.p_expr();
 	this.expect(":");
 	b = this.p_expr();
@@ -685,7 +449,7 @@ Parser.p_range[]()
 	return [a, b];
 }
 
-void
+Symbol
 Parser.p_port_declaration()
 {
 	string dir;
@@ -693,32 +457,50 @@ Parser.p_port_declaration()
 	bool signed;
 	Node range[];
 	Symbol sym;
+	Type t;
 
 	this.p_attributes();
 	dir = this.expectany({"kw:input": true, "kw:output": true, "kw:inout": true}).t.substr(3);
 	wire = this.expectany({"kw:wire": true, "kw:reg": true}).t == "kw:wire";
 	signed = this.got("kw:signed") !== null;
-	if(this.peek().t === "[")
-		range = this.p_range();
-	else
-		range = null;
+	range = this.p_range();
 	sym = this.expect("id").sym;
-	
-	sym.t = SYMPORT;
+	if(range === null)
+		t = signed ? sbittype : bittype;
+	else
+		t = new Type(TYPBITV, signed, range[1], range[0], null);
+	sym = decl(this.lineno, this.scope, SYMPORT, sym, t, null);
 	sym.dir = dir;
 	sym.portreg = !wire;
-	if(range === null)
-		sym.type = signed ? sbittype : bittype;
-	else
-		sym.type = new Type(TYPBITV, signed, range[1], range[0], null);
+	return sym;
 }
 
-void
-Parser.p_delay3()
+Node
+Parser.p_delay()
 {
+	Token t;
+	Node n, d;
+
 	if(this.got("#") !== null){
-		this.expect("num");
+		t = this.expectany({"num": true, "id": true, "(": true});
+		switch(t.t){
+		case "num":
+			d = new Node(Node{t: ASTCINT, numi: parseInt(t.str), lineno: this.lineno});
+			break;
+		case "id":
+			if(t.sym.t == SYMNONE)
+				error(this.lineno, "undeclared '" + (string)t.sym + "'");
+			d = new Node(Node{t: ASTSYM, sym: t.sym, lineno: this.lineno});
+			break;
+		case "(":
+			n = this.p_expr();
+			this.expect(")");
+			d = n;
+			break;
+		}
+		return new Node(Node{t: ASTDELAY, n1: d, lineno: d.lineno});
 	}
+	return null;
 }
 
 Node
@@ -728,7 +510,7 @@ Parser.p_hier_identifier()
 	Node n;
 	
 	s = this.expect("id").sym;
-	if(s.t === undefined)
+	if(s.t == SYMNONE)
 		error(this.lineno, "undeclared '" + s.toString() + "'");
 	n = new Node(Node{t: ASTSYM, sym: s, lineno: this.lineno});
 /*	while(this.got(".") !== null)
@@ -795,7 +577,7 @@ Parser.p_primary()
 			a = null;
 			c = t;
 		}
-		cn = numparse(this.lineno, null, b, c);
+		cn = numparse(this.lineno, a, b, c);
 		if(cn.sign && cn.v.length < 32 && cn.v.indexOf("x") < 0 && cn.v.indexOf("z") < 0)
 			return new Node(Node{t: ASTCINT, numi: mptoi(cn.v), lineno: this.lineno});
 		return new Node(Node{t: ASTNUM, num: cn, lineno: this.lineno});
@@ -875,25 +657,31 @@ Parser.p_expr_core()
 }
 
 Node
+Parser.p_concat(Node p)
+{
+	Node l[];
+
+	l = [p];
+	while(this.got(",") !== null)
+		l.push(this.p_expr());
+	while(this.got(",") !== null);
+	this.expect("}");
+	return new Node(Node{t: ASTCONCAT, l: l, lineno: this.lineno});
+}
+
+Node
 Parser.p_expr()
 {
-	Node p, q, l[], r;
+	Node p, q, r;
 	
 	if(this.got("{") !== null){
 		p = this.p_expr();
 		if(this.got("{") !== null){
-			q = this.p_expr();
+			q = this.p_concat(this.p_expr());
 			this.expect("}");
-			this.expect("}");
-			return new Node(Node{t: ASTREPL, n1: p, n2: q, lineno: this.lineno});
-		}else{
-			l = [p];
-			while(this.got(",") !== null)
-				l.push(this.p_expr());
-			while(this.got(",") !== null);
-			this.expect("}");
-			return new Node(Node{t: ASTCONCAT, l: l, lineno: this.lineno});
-		}
+			return new Node(Node{t: ASTREPL, n1: q, n2: p, lineno: this.lineno});
+		}else
+			return this.p_concat(p);
 	}else{
 		p = this.p_expr_core();
 		if(this.got("?") !== null){
@@ -908,31 +696,393 @@ Parser.p_expr()
 }
 
 Node
-Parser.p_assignment()
+Parser.p_assignment(Node delay)
 {
 	Node l, r;
 	
 	l = this.p_lvalue();
 	this.expect("=");
 	r = this.p_expr();
-	return new Node(Node{t: ASTASSIGN, n1: l, n2: r, lineno: this.lineno});
+	return new Node(Node{t: ASTASSIGN, n1: l, n2: r, lineno: this.lineno, delay: delay});
+}
+
+void
+Parser.p_param_decl(bool islocal)
+{
+	Token t;
+	Type ty;
+	bool sign;
+	Node range[];
+	Node r;
+	Symbol l;
+	
+	if(t = this.gotany({"kw:integer": true, "kw:real": true, "kw:realtime": true, "kw:time": true}), t !== null)
+		ty = {"kw:integer": inttype, "kw:real": realtype, "kw:realtime": realtype, "kw:time": timetype}[t.t];
+	else{
+		sign = this.got("kw:signed") !== null;
+		if(this.peek().t == "["){
+			range = this.p_range();
+			ty = new Type(TYPBITV, sign, range[1], range[0], null);
+		}else
+			ty = new Type(TYPUNSZ, sign);
+	}
+	do{
+		l = this.expect("id").sym;
+		this.expect("=");
+		r = this.p_expr();
+		this.curmod.params.push(decl(this.lineno, this.scope, islocal ? SYMLPARAM : SYMPARAM, l, ty, r));
+	}while(this.got(",") !== null && this.peek().t === "id");
+}
+
+Node
+Parser.p_event_expr[]()
+{
+	Node n;
+	Node l[];
+
+	l = [];
+	do{
+		if(this.got("kw:posedge") !== null)
+			n = new Node(Node{t: ASTPOSEDGE, n1: this.p_expr(), lineno: this.lineno});
+		else if(this.got("kw.negedge") !== null)
+			n = new Node(Node{t: ASTNEGEDGE, n1: this.p_expr(), lineno: this.lineno});
+		else
+			n = this.p_expr();
+		l.push(n);
+	}while(this.gotany({"kw:or": true, ",": true}) !== null);
+	return l;
+}
+
+Node
+Parser.p_event_control()
+{
+	Node n[];
+
+	if(this.got("@*") !== null)
+		return new Node(Node{t: ASTAT, l: null, lineno: this.lineno});
+	this.expect("@");
+	if(this.got("(") !== null){
+		if(this.got("*") !== null)
+			n = null;
+		else
+			n = this.p_event_expr();
+		this.expect(")");
+	}else
+		n = [this.p_hier_identifier()];
+	return new Node(Node{t: ASTAT, l: n, lineno: this.lineno});
+}
+
+Node
+Parser.p_stat_assign()
+{
+	Node l, r, n, d;
+	int lineno;
+	Token t;
+	bool nonblock;
+
+	l = this.p_lvalue();
+	lineno = this.lineno;
+	nonblock = this.expectany({"=": true, "<=": true}).t == "<=";
+	d = null;
+	switch(t = this.peek(), t.t){
+	case "@": case "@*": d = this.p_event_control(); break;
+	case "#": d = this.p_delay(); break;
+	case "kw:repeat":
+		this.lex();
+		this.expect("(");
+		n = this.p_expr();
+		this.expect(")");
+		d = new Node(Node{t: ASTREPEAT, n1: n, n2: this.p_event_control(), lineno: this.lineno});
+		break;
+	}
+	r = this.p_expr();
+	this.expect(";");
+	return new Node(Node{t: nonblock ? ASTDASS : ASTASS, n1: l, n2: r, delay: d, lineno: lineno});
+}
+
+Node
+Parser.p_var_assign()
+{	
+	Node l, r;
+	int lineno;
+
+	l = this.p_lvalue();
+	lineno = this.lineno;
+	this.expect("=");
+	r = this.p_expr();
+	return new Node(Node{t: ASTASS, n1: l, n2: r, delay: null, lineno: lineno});
+}
+
+Node
+Parser.p_case(string t)
+{
+	Node a, x[], y, l[];
+	int lineno0, lineno1;
+
+	lineno0 = this.lineno;
+	this.expect("(");
+	a = this.p_expr();
+	this.expect(")");
+	l = [];
+	while(!this.got("kw:endcase")){
+		lineno1 = this.lineno;
+		if(this.got("kw:default") !== null){
+			this.got(":");
+			x = null;
+			y = mkblock(this.p_stat());
+		}else{
+			x = [];
+			do
+				x.push(this.p_expr());
+			while(this.got(",") !== null);
+			this.expect(":");
+			y = mkblock(this.p_stat());
+		}
+		l.push(new Node(Node{t: ASTCASIT, n1: y, l: x, lineno: lineno1}));
+	}
+	return new Node(Node{t: t=="kw:casez"?ASTCASEZ:t=="kw:casex"?ASTCASEX:ASTCASE, n1: a, l: l, lineno: lineno0});
+}
+
+Node
+Parser.p_stat[]()
+{
+	Token t;
+	Node a, b, c, d;
+	int lineno;
+	Node l[];
+
+	switch(t = this.peek(), t.t){
+	case "id":
+		return [this.p_stat_assign()];
+	case "kw:begin":
+		this.lex();
+		l = [];
+		while(this.got("kw:end") === null)
+			l.push.apply(l, this.p_stat());
+		return l;
+	case "kw:if":
+		this.lex();
+		lineno = this.lineno;
+		this.expect("(");
+		a = this.p_expr();
+		this.expect(")");
+		b = mkblock(this.p_stat());
+		if(this.got("kw:else") !== null)
+			c = mkblock(this.p_stat());
+		else
+			c = null;
+		return [new Node(Node{t: ASTIF, n1: a, n2: b, n3: c, lineno: lineno})];
+	case "kw:forever":
+		this.lex();
+		a = mkblock(this.p_stat());
+		return [new Node(Node{t: ASTFOREVER, n1: a, lineno: lineno})];
+	case "kw:while":
+		this.lex();
+		lineno = this.lineno;
+		this.expect("(");
+		a = this.p_expr();
+		this.expect(")");
+		b = mkblock(this.p_stat());
+		return [new Node(Node{t: ASTWHILE, n1: a, n2: b, lineno: lineno})];
+	case "kw:repeat":
+		this.lex();
+		lineno = this.lineno;
+		this.expect("(");
+		a = this.p_expr();
+		this.expect(")");
+		b = mkblock(this.p_stat());
+		return [new Node(Node{t: ASTREPEAT, n1: a, n2: b, lineno: lineno})];
+	case "kw:for":
+		this.lex();
+		lineno = this.lineno;
+		this.expect("(");
+		a = this.p_var_assign();
+		this.expect(";");
+		b = this.p_expr();
+		this.expect(";");
+		c = this.p_var_assign();
+		this.expect(")");
+		d = mkblock(this.p_stat());
+		return [new Node(Node{t: ASTFOR, n1: a, n2: b, n3: c, n4: d, lineno: lineno})];
+	case "kw:case": case "kw:casex": case "kw:casez":
+		this.lex();
+		return [this.p_case(t.t)];
+	case ";":
+		return [];
+	default:
+		error(this.lineno, "unexpected " + (string)t.t);
+	}
+}
+
+void
+Parser.p_module_item_decl(string t)
+{
+	bool signrangeok, initok, delayok;
+	bool sign;
+	Node delay;
+	Symbol s;
+	Type bt, st;
+	Node range[], mrange[];
+	int saw;
+	SymbolType symt;
+	
+	switch(t){
+	case "kw:wire": symt = SYMWIRE; break;
+	case "kw:genvar": symt = SYMGENVAR; break;
+	case "kw:event": symt = SYMEVENT; break;
+	default: symt = SYMREG; break;
+	}
+	signrangeok = t == "kw:wire" || t == "kw:reg";
+	initok = t != "kw:event";
+	delayok = t == "kw:wire";
+	
+	sign = this.got("kw:signed") !== null;
+	if(sign && !signrangeok)
+		error(this.lineno, "signed not allowed with " + t);
+	range = this.p_range();
+	if(range !== null && !signrangeok)
+		error(this.lineno, "range not allowed with " + t);
+	delay = this.p_delay();
+	if(delay !== null && !delayok)
+		error(this.lineno, "delay not allowed with " + t);
+	switch(t){
+	case "kw:wire": case "kw:reg":
+		if(range === null)
+			bt = new Type(TYPBIT, sign);
+		else
+			bt = new Type(TYPBITV, sign, range[1], range[0], null);
+		break;
+	case "kw:genvar": bt = sunsztype; break;
+	case "kw:event": bt = eventtype; break;
+	case "kw:integer": bt = inttype; break;
+	case "kw:real": case "kw:realtime": bt = realtype; break;
+	case "kw:time": bt = timetype; break;
+	default: throw "shouldn't happen";
+	}
+	saw = 0;
+	do{
+		s = this.expect("id").sym;
+		mrange = this.p_range();
+		if(mrange !== null){
+			st = new Type(TYPMEM, false, mrange[1], mrange[0], bt);
+			saw |= 2;
+		}else
+			st = bt;
+		s = decl(this.lineno, this.scope, symt, s, st, null);
+		s.delay = delay;
+		if(this.got("=") !== null){
+			if(mrange !== null)
+				error(this.lineno, "memories cannot have initialisers");
+			s.def = this.p_expr();
+			saw |= 1;
+		}
+	}while(this.got(",") !== null);
+	if(saw == 3)
+		error(this.lineno, "mixed declaration of memories and initialised signals not allowed");
+	this.expect(";");
+}
+
+Node
+Parser.p_module_inst[](Token t)
+{
+	Symbol mname, iname;
+	Node pl[], l[], r[], b;
+	Symbol a;
+	int lineno, lineno0;
+	
+	mname = t.sym;
+	pl = [];
+	r = [];
+	if(this.got("#") !== null){
+		this.expect("(");
+		for(;;){
+			lineno = this.lineno;
+			if(this.got(".") !== null){
+				a = this.expect("id").sym;
+				this.expect("(");
+				if(this.got(")") === null){
+					b = this.p_expr();
+					this.expect(")");
+				}else
+					b = null;
+			}else{
+				a = null;
+				b = this.p_expr();
+			}
+			pl.push(new Node(Node{t: ASTMINSVAL, sym: a, n1: b, lineno: lineno}));
+			if(this.got(")") !== null) break;
+			this.expect(",");
+			if(this.got(")") !== null)
+				error(this.lineno, "extra comma at end of module parameter list");
+		}
+	}
+	for(;;){
+		lineno0 = this.lineno;
+		iname = this.expect("id").sym;
+		iname = decl(lineno0, this.scope, SYMINST, iname, null, null);
+		l = [];
+		this.expect("(");
+		if(this.got(")") === null)
+			for(;;){
+				lineno = this.lineno;
+				if(this.got(".") !== null){
+					a = this.expect("id").sym;
+					this.expect("(");
+					if(this.got(")") === null){
+						b = this.p_expr();
+						this.expect(")");
+					}else
+						b = null;
+				}else{
+					a = null;
+					b = this.p_expr();
+				}
+				l.push(new Node(Node{t: ASTMINSVAL, sym: a, n1: b, lineno: lineno}));
+				if(this.got(")") !== null) break;
+				this.expect(",");
+				if(this.got(")") !== null)
+					error(this.lineno, "extra comma at end of module port list");
+			}
+		r.push(new Node(Node{t: ASTMINST, sym: mname, symn: iname, l: l, pl: pl, lineno: lineno0}));
+		if(this.got(";") !== null)
+			return r;
+		this.expect(",");
+	}
 }
 
 Node
 Parser.p_module_item[]()
 {
 	Token t;
-	Node r[];
+	int l;
+	Node n, r[], d;
 	
 	r = [];
 	switch(t = this.lex(), t.t){
 	case "kw:assign":
-		this.p_delay3();
-		r.push(this.p_assignment());
-		while(this.got(",") !== null)
-			r.push(this.p_assignment());
+		d = this.p_delay();
+		do
+			r.push(this.p_assignment(d));
+		while(this.got(",") !== null);
 		this.expect(";");
 		break;
+	case "kw:localparam": this.p_param_decl(false); this.expect(";"); break;
+	case "kw:parameter": this.p_param_decl(true); this.expect(";"); break;
+	case "kw:initial":
+		l = this.lineno;
+		r = this.p_stat();
+		return [new Node(Node{t: ASTINITIAL, n1: mkblock(r), lineno: l})];
+	case "kw:always":
+		l = this.lineno;
+		r = this.p_stat();
+		return [new Node(Node{t: ASTALWAYS, n1: mkblock(r), lineno: l})];
+	case "kw:wire": case "kw:reg": case "kw:integer":
+	case "kw:real": case "kw:time": case "kw:realtime":
+	case "kw:event": case "kw:genvar":
+		this.p_module_item_decl(t.t);
+		return [];
+	case "id":
+		return this.p_module_inst(t);
 	default:
 		error(this.lineno, "unexpected " + t.t);
 	}
@@ -951,20 +1101,32 @@ Parser.p_module()
 	this.expect("kw:module");
 	lno = this.lineno;
 	s = this.expect("id").sym;
+	s = decl(this.lineno, this.global, SYMMOD, s, null, null);
+	s.ports = [];
+	s.params = [];
 	this.newscope(s);
+	this.curmod = s;
 	try{
+		if(this.got("#") !== null){
+			this.expect("(");
+			do{
+				this.expect("kw:parameter");
+				this.p_param_decl(false);
+			}while(this.got(")") === null);
+		}
 		if(this.got("(") !== null && this.got(")") === null){
-			this.p_port_declaration();
+			s.ports.push(this.p_port_declaration());
 			while(this.got(",") !== null)
-				this.p_port_declaration();
+				s.ports.push(this.p_port_declaration());
 			this.expect(")");
 		}
 		this.expect(";");
 		r = [];
 		while(this.got("kw:endmodule") === null)
 			r.push.apply(r, this.p_module_item());
-		n = new Node(Node{t: ASTMODULE, sym: s, stat: r, lineno: lno});
+		n = new Node(Node{t: ASTMODULE, sym: s, l: r, lineno: lno});
 	}finally{
+		this.curmod = null;
 		this.scopeup();
 	}
 	return n;
@@ -975,16 +1137,25 @@ parse()
 {
 	string s;
 	Parser p;
-	Node m;
-	var e;
+	Node m[];
+	var e, i;
 	
 	s = document.getElementById("code").value;
 	localStorage.setItem("text", s);
 	p = new Parser(s);
+	document.getElementById("out").innerHTML = "";
 	try{
-		m = p.p_module();
-		typecheck(m, null);
-		document.getElementById("out").innerHTML = m.toDebug();
+		m = [];
+		while(!p.got("EOF"))
+			m.push(p.p_module());
+		try{
+			for(i = 0; i < m.length; i++)
+				p.typecheck(m[i], null);
+		}catch(e){
+			document.getElementById("out").innerHTML = e + "\n";
+		}
+		for(i = 0; i < m.length; i++)
+			document.getElementById("out").innerHTML += m[i].toDebug();
 	}catch(e){
 		document.getElementById("out").innerHTML = e;
 	}

@@ -5,6 +5,8 @@ TARG=ratjs
 OFILES=ratjs.$O
 
 RJ=\
+	u.rj \
+	dat.rj \
 	arith.rj\
 	parse.rj\
 	ast.rj\

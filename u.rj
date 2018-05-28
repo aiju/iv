@@ -1,0 +1,15 @@
+string string.charAt(int);
+int string.charCodeAt(int);
+string string.substr(int, ... int);
+string string.repeat(int);
+int string.length;
+int parseInt(string, ... int);
+string int.toString();
+int string.indexOf(string);
+string string.toLowerCase();
+extern var String;
+extern bool false, true;
+extern var null, undefined;
+extern var document;
+extern var localStorage;
+extern var console;

@@ -21,6 +21,14 @@ lvalcheck(Node n, bool cont)
 				if(!n.sym.portreg && !cont)
 					error(n.lineno, "procedural assignment to wire '" + n.sym.toString() + "'");
 				break;
+			case SYMWIRE:
+				if(!cont)
+					error(n.lineno, "procedural assignment to wire '" + n.sym.toString() + "'");
+				break;
+			case SYMREG:
+				if(cont)
+					error(n.lineno, "continuous assignment to reg '" + n.sym.toString() + "'");
+				break;
 			default:
 				error(n.lineno, "invalid lval " + (string)n.sym.t);
 			}
@@ -33,29 +41,162 @@ lvalcheck(Node n, bool cont)
 	lvalcheck0(n, cont);
 }
 
+bool
+isbits(Type t)
+{
+	return {TYPBITS: true, TYPBITV: true, TYPBIT: true}[t.t] == true;
+}
+
+bool
+intcheck(Node n, bool realok, string s)
+{
+	TypeType t1;
+
+	if(n === null)
+		return true;
+	if(n.type === null)
+		return false;
+	t1 = n.type.t;
+	if(t1 != TYPUNSZ && !isbits(n.type) && (!realok || t1 != TYPREAL)){
+		error(n.lineno, (string)n.type + s);
+		return false;
+	}
+	return true;
+}
+
 void
-typecheck(Node n, Type ctxt)
+condcheck(Node n)
+{
+	if(n.type.t != TYPUNSZ && !isbits(n.type))
+		error(n.lineno, (string)n.type + " as condition");
+}
+
+void
+Parser.checkminst(Node n)
 {
 	int i;
+	int seen;
+	Symbol s, t;
+	bool marks[string];
+	
+	seen = 0;
+	s = n.sym;
+	for(i = 0; i < n.pl.length; i++){
+		if(n.pl[i].sym == null)
+			seen |= 1;
+		else
+			seen |= 2;
+	}
+	switch(seen){
+	case 3:
+		error(n.lineno, "mixed ordered and unordered parameter assignments");
+		break;
+	case 1:
+		if(n.pl.length > s.params.length)
+			error(n.lineno, "too many parameters for module " + (string)s);
+		for(i = 0; i < n.pl.length && i < s.params.length; i++){
+			n.l[i].sym = s.params[i];
+			if(n.pl[i].n1 === null) continue;
+			this.typecheck(n.pl[i].n1, s.params[i].type);
+			intcheck(n.pl[i].n1, true, " as parameter value");
+			if(!n.pl[i].n1.isconst)
+				error(n.pl[i].n1.lineno, "parameter values must be constants");
+		}
+		break;
+	case 2:
+		marks = {};
+		for(i = 0; i < n.pl.length; i++){
+			if(marks[n.pl[i].sym.name]){
+				error(n.pl[i].lineno, "'" + n.pl[i].sym.name + "' assigned twice");
+				continue;
+			}
+			marks[n.pl[i].sym.name] = true;
+			t = getsym(s.st, n.pl[i].sym.name, false);
+			if(t.t != SYMPARAM)
+				error(n.pl[i].lineno, "'" + n.pl[i].sym.name + "' no such parameter");
+			n.pl[i].sym = t;
+			if(n.pl[i].n1 === null) continue;
+			this.typecheck(n.pl[i].n1, t.type);
+			intcheck(n.pl[i].n1, true, " as parameter value");
+			if(!n.pl[i].n1.isconst)
+				error(n.pl[i].n1.lineno, "parameter values must be constants");
+		}
+		break;
+	}
+	seen = 0;
+	s = n.sym;
+	for(i = 0; i < n.l.length; i++){
+		if(n.l[i].sym == null)
+			seen |= 1;
+		else
+			seen |= 2;
+	}
+	switch(seen){
+	case 3:
+		error(n.lineno, "mixed ordered and unordered port assignments");
+		break;
+	case 1:
+		if(n.l.length > s.ports.length)
+			error(n.lineno, "too many ports for module " + (string)s);
+		for(i = 0; i < n.l.length && i < s.ports.length; i++){
+			n.l[i].sym = s.ports[i];
+			if(n.l[i].n1 === null) continue;
+			this.typecheck(n.l[i].n1, s.ports[i].type);
+			intcheck(n.l[i].n1, true, " as port assignment");
+			if(s.ports[i].dir != "input")
+				lvalcheck(n.l[i].n1, true);
+		}
+		break;
+	case 2:
+		marks = {};
+		for(i = 0; i < n.l.length; i++){
+			if(marks[n.l[i].sym.name]){
+				error(n.l[i].lineno, "'" + n.l[i].sym.name + "' assigned twice");
+				continue;
+			}
+			marks[n.l[i].sym.name] = true;
+			t = getsym(s.st, n.l[i].sym.name, false);
+			if(t.t != SYMPORT)
+				error(n.l[i].lineno, "'" + n.l[i].sym.name + "' no such port");
+			n.l[i].sym = t;
+			if(n.l[i].n1 === null) continue;
+			this.typecheck(n.l[i].n1, t.type);
+			intcheck(n.l[i].n1, true, " as port assignment");
+			if(t.dir != "input")
+				lvalcheck(n.l[i].n1, true);
+		}
+		break;
+	}
+}
+
+void
+Parser.typecheck(Node n, Type ctxt)
+{
+	int i, j;
 	TypeType t1, t2;
 	bool s;
+	Node m, r;
 
+	if(n == null) return;
 	switch(n.t){
+	case ASTASS:
+	case ASTDASS:
 	case ASTASSIGN:
-		typecheck(n.n2, ctxt);
-		typecheck(n.n1, ctxt);
-		lvalcheck(n.n1, true);
+		this.typecheck(n.n1, null);
+		this.typecheck(n.n2, n.n1.type);
+		this.typecheck(n.delay, null);
+		lvalcheck(n.n1, n.t == ASTASSIGN);
 		break;
 	case ASTBIN:
 		switch(n.op){
 		case "==": case "!=": case "<": case "<=":
 		case ">": case ">=": case "===": case "!==":
-			typecheck(n.n1, null);
-			typecheck(n.n2, null);
+			this.typecheck(n.n1, null);
+			this.typecheck(n.n2, null);
 			break;
 		default:
-			typecheck(n.n1, ctxt);
-			typecheck(n.n2, ctxt);
+			this.typecheck(n.n1, ctxt);
+			this.typecheck(n.n2, ctxt);
 		}
 		n.isconst = n.n1.isconst && n.n2.isconst;
 		s = n.n1.type.sign && n.n2.type.sign;
@@ -94,7 +235,7 @@ typecheck(Node n, Type ctxt)
 		case "&": case "|": case "~^": case "^":
 			if(t1 == TYPUNSZ || t2 == TYPUNSZ || ctxt !== null && ctxt.t == TYPUNSZ)
 				n.type = s ? sunsztype : unsztype;
-			else if(ctxt !== null && (ctxt.t == TYPBITS || ctxt.t == TYPBITV || ctxt.t == TYPBIT))
+			else if(ctxt !== null && isbits(ctxt))
 				n.type = new Type(TYPBITS, s, maxi(maxi(n.n1.type.sz, n.n2.type.sz), ctxt.sz));
 			else
 				n.type = new Type(TYPBITS, s, maxi(n.n1.type.sz, n.n2.type.sz));
@@ -106,11 +247,11 @@ typecheck(Node n, Type ctxt)
 			n.type = bittype;
 			return;
 		default:
-			error(n.lineno, "typecheck: unknown op '" + n.op + "'");
+			error(n.lineno, "this.typecheck: unknown op '" + n.op + "'");
 		}
 		break;
 	case ASTUN:
-		typecheck(n.n1, ctxt);
+		this.typecheck(n.n1, ctxt);
 		n.isconst = n.n1.isconst;
 		t1 = n.n1.type.t;
 		if(t1 == TYPMEM)
@@ -127,10 +268,37 @@ typecheck(Node n, Type ctxt)
 			n.type = n.n1.type;
 		}else if(ctxt !== null && ctxt.t == TYPUNSZ || t1 == TYPUNSZ)
 			n.type = n.n1.type.sign ? sunsztype : unsztype;
-		else if(ctxt !== null && (ctxt.t == TYPBITS || ctxt.t == TYPBITV || ctxt.t == TYPBIT))
+		else if(ctxt !== null && isbits(ctxt))
 			n.type = new Type(TYPBITS, n.n1.type.sign, maxi(n.n1.type.sz, ctxt.sz));
 		else
 			n.type = n.n1.type;
+		break;
+	case ASTCONCAT:
+		r = new Node(Node{t: ASTCINT, numi: 0, lineno: n.lineno, type: unsztype});
+		n.isconst = true;
+		for(i = 0; i < n.l.length; i++){
+			m = n.l[i];
+			this.typecheck(m, null);
+			if(m.type == null || !isbits(m.type))
+				error(n.lineno, (string)m.type + " in concatenation");
+			else
+				r = new Node(Node{t: ASTBIN, op: "+", n1: r, n2: m.type.sz, type: unsztype, lineno: n.lineno});
+			if(!m.isconst)
+				n.isconst = false;
+		}
+		n.type = new Type(TYPBITS, false, r);
+		break;
+	case ASTREPL:
+		this.typecheck(n.n1, null);
+		this.typecheck(n.n2, null);
+		if(n.n1.type == null || !isbits(n.n1.type)){
+			error(n.n1.lineno, (string)n.n2.type + " in replication");
+		}else if(!intcheck(n.n2, false, " in replication")){
+		}else if(!n.n2.isconst)
+			error(n.n2.lineno, "replication factor not constant");
+		else
+			r = new Node(Node{t: ASTBIN, op: "*", n1: n.n2, n2: n.n1.type.sz, type: unsztype, lineno: n.lineno});
+		n.type = new Type(TYPBITS, false, r);
 		break;
 	case ASTSYM:
 		n.type = n.sym.type;
@@ -146,11 +314,76 @@ typecheck(Node n, Type ctxt)
 		n.type = unsztype;
 		n.isconst = true;
 		break;
+	case ASTINITIAL:
+	case ASTALWAYS:
+		this.typecheck(n.n1, null);
+		break;
 	case ASTMODULE:
-		for(i = 0; i < n.stat.length; i++)
-			typecheck(n.stat[i], null);
+	case ASTBLOCK:
+		for(i = 0; i < n.l.length; i++)
+			this.typecheck(n.l[i], null);
+		break;
+	case ASTDELAY:
+		this.typecheck(n.n1, null);
+		intcheck(n.n1, true, " in delay");
+		break;
+	case ASTAT:
+		if(n.l !== null){
+			for(i = 0; i < n.l.length; i++){
+				this.typecheck(n.l[i], null);
+				if(n.l[i].type.t == TYPMEM)
+					error(n.lineno, "memory as event");
+			}
+		}
+		break;
+	case ASTREPEAT:
+		this.typecheck(n.n1, null);
+		this.typecheck(n.n2, null);
+		intcheck(n.n1, false, " in repeat");
+		break;
+	case ASTIF:
+	case ASTWHILE:
+		this.typecheck(n.n1, null);
+		this.typecheck(n.n2, null);
+		this.typecheck(n.n3, null);
+		condcheck(n.n1);
+		break;
+	case ASTFOREVER:
+		this.typecheck(n.n1, null);
+		break;
+	case ASTFOR:
+		this.typecheck(n.n1, null);
+		this.typecheck(n.n2, null);
+		this.typecheck(n.n3, null);
+		this.typecheck(n.n4, null);
+		condcheck(n.n2);
+		break;
+	case ASTCASE:
+	case ASTCASEX:
+	case ASTCASEZ:
+		this.typecheck(n.n1, null);
+		intcheck(n.n1, false, " in case");
+		for(i = 0; i < n.l.length; i++){
+			if(n.l[i].t != ASTCASIT)
+				throw "shouldn't happen";
+			if(n.l[i].l !== null)
+				for(j = 0; j < n.l[i].l.length; j++){
+					this.typecheck(n.l[i].l[j], n.n1.type);
+					intcheck(n.l[i].l[j], false, " as case item");
+				}
+			this.typecheck(n.l[i].n1, n.n1.type);
+		}
+		break;
+	case ASTMINST:
+		n.sym = getsym(this.scope, n.sym.name, false);
+		if(n.sym.t === SYMNONE)
+			error(n.lineno, "'" + (string)n.sym + "' undeclared");
+		else if(n.sym.t !== SYMMOD)
+			error(n.lineno, "'" + (string)n.sym + "' not a module");
+		else
+			this.checkminst(n);
 		break;
 	default:
-		error(n.lineno, "typecheck: unknown " + (string)n.t);
+		error(n.lineno, "this.typecheck: unknown " + (string)n.t);
 	}
 }

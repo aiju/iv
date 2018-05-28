@@ -2047,7 +2047,7 @@ idxtype(Line *lno, Type *a, Type *i)
 	int numok, strok;
 	
 	if(a->t == TYPMAP){
-		if(!assok(a->idx, i))
+		if(!assok(a->idx, i) && i->t != TYPSTRING && (a->idx->t != TYPSTRING || i->t != TYPENUM))
 			error(lno, "%τ as index into %τ", i, a);
 		return a->ret;
 	}

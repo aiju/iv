@@ -1,0 +1,447 @@
+struct Symbol;
+struct Type;
+struct Const;
+struct Scope;
+
+struct Node {
+	enum NodeType {
+		ASTMODULE,
+		ASTASSIGN,
+		ASTSYM,
+		ASTBIN,
+		ASTCINT,
+		ASTCONCAT,
+		ASTNUM,
+		ASTUN,
+		ASTIDX,
+		ASTREPL,
+		ASTTERN,
+		ASTINITIAL,
+		ASTALWAYS,
+		ASTASS,
+		ASTDASS,
+		ASTDELAY,
+		ASTAT,
+		ASTREPEAT,
+		ASTPOSEDGE,
+		ASTNEGEDGE,
+		ASTBLOCK,
+		ASTIF,
+		ASTWHILE,
+		ASTFOR,
+		ASTFOREVER,
+		ASTCASE,
+		ASTCASEX,
+		ASTCASEZ,
+		ASTCASIT,
+		ASTMINSVAL,
+		ASTMINST,
+	} t;
+	Type type;
+	bool isconst;
+	string op;
+	Node n1, n2, n3, n4;
+	Node delay;
+	Symbol sym, symn;
+	Node l[], pl[];
+	Const num;
+	int numi;
+	int lineno;
+};
+
+struct Type {
+	enum TypeType {
+		TYPBIT,
+		TYPBITS,
+		TYPBITV,
+		TYPUNSZ,
+		TYPEVENT,
+		TYPREAL,
+		TYPMEM
+	} t;
+	bool sign;
+	Node lo;
+	Node hi;
+	Node sz;
+	Type elem;
+};
+
+struct Token {
+	string t;
+	string str;
+	Symbol sym;
+	int base;
+	bool sign;
+};
+
+void
+Type(TypeType t, ... bool sign, Node lo, Node hi, Type elem)
+{
+	this.t = t;
+	this.sign = sign;
+	if(t == TYPBITV || t == TYPMEM){
+		this.lo = lo;
+		this.hi = hi;
+	}else{
+		this.lo = null;
+		this.hi = null;
+	}
+	if(t == TYPBITV || t == TYPMEM)
+		this.sz = new Node(Node{t: ASTBIN, op: "+", n1: new Node(Node{t: ASTBIN, op: "-", n1: this.hi, n2: this.lo}), n2: new Node(Node{t: ASTCINT, numi: 1})});
+	else if(t == TYPBITS)
+		this.sz = lo;
+	else if(t == TYPBIT)
+		this.sz = new Node(Node{t: ASTCINT, numi: 1});
+	else
+		this.sz = null;
+	this.elem = elem;
+}
+
+Type bittype = new Type(TYPBIT, false);
+Type sbittype = new Type(TYPBIT, true);
+Type eventtype = new Type(TYPEVENT, false);
+Type unsztype = new Type(TYPUNSZ, false);
+Type sunsztype = new Type(TYPUNSZ, true);
+Type realtype = new Type(TYPREAL);
+Type inttype = new Type(TYPBITS, true, new Node(Node{t: ASTCINT, numi: 32}));
+Type timetype = new Type(TYPBITS, false, new Node(Node{t: ASTCINT, numi: 64}));
+
+string
+Type.toString()
+{
+	switch(this.t){
+	case TYPBIT:
+		return "bit" + (this.sign ? " signed" : "");
+	case TYPBITV:
+		return "bit" + (this.sign ? " signed [" : " [") + (string)this.hi + ":" + (string)this.lo + "]";
+	case TYPUNSZ:
+		return "unsized" + (this.sign ? " signed" : "");
+	case TYPBITS:
+		return "bit" + (this.sign ? " signed [" : " [") + (string)this.sz + "]";
+	case TYPREAL:
+		return "real";
+	case TYPEVENT:
+		return "event";
+	case TYPMEM:
+		return (string)this.elem + "[" + (string)this.hi + ":" + (string)this.lo + "]";
+	default:
+		return (string)this.t;
+	}
+}
+
+string
+Type.toDebug()
+{
+	switch(this.t){
+	case TYPBIT:
+	case TYPUNSZ:
+		return (string)this.t + (this.sign ? " signed" : "");
+	case TYPBITV:
+		return (string)this.t + (this.sign ? " signed [" : " [") + this.hi.toString() + ":" + this.lo.toString() + "]";
+	case TYPBITS:
+		return (string)this.t + (this.sign ? " signed [" : " [") + this.sz.toString() + "]";
+	default:
+		return (string)this.t;
+	}
+}
+
+struct Const {
+	string v;
+	int sz;
+	bool sign;
+};
+
+void
+Const(string v, int sz, bool sign)
+{
+	this.v = v;
+	this.sz = sz;
+	this.sign = sign;
+}
+
+string
+Const.toString()
+{
+	string s;
+	int i;
+
+	s = "";
+	if(this.sz !== null)
+		s += this.sz.toString();
+	if(this.sign)
+		s += "'sb";
+	else
+		s += "'b";
+	for(i = 0; i < this.v.length; i++)
+		s += this.v.charAt(this.v.length - 1 - i);
+	return s;
+}
+
+function
+Node(Node attr)
+{
+	string i;
+
+	for(i in attr)
+		this[i] = attr[i];
+	this.isconst = false;
+}
+
+string
+Node.toString(...string ind, int lvl)
+{
+	string s;
+	var t;
+	int i;
+
+	if(ind === undefined) ind = "";
+	if(lvl === undefined) lvl = 0;
+	switch(this.t){
+	case ASTMODULE:
+		s = ind + "module;\n";
+		for(i = 0; i < this.l.length; i++)
+			s += this.l[i].toString(ind + "\t") + "\n";
+		s += ind + "endmodule";
+		return s;
+	case ASTSYM:
+		return this.sym.toString();
+	case ASTBIN:
+		t = optab[this.op];
+		s = this.n1.toString(ind, t.prec) + " " + this.op + " " + this.n2.toString(ind, t.prec + 1);
+		if(optab[this.op].prec < lvl)
+			s = "(" + s + ")";
+		return s;
+	case ASTCONCAT:
+		s = "{";
+		for(i = 0; i < this.l.length; i++){
+			if(i > 0) s += ", ";
+			s += this.l[i].toString(ind, 0);
+		}
+		s += "}";
+		return s;
+	case ASTASSIGN:
+		return this.n1.toString() + " = " + this.n2.toString() + ";";
+	case ASTNUM:
+		return this.num.toString();
+	case ASTCINT:
+		return this.numi.toString();
+	case ASTUN:
+		return this.op + this.n1.toString();
+	case ASTAT:
+		if(this.l === null)
+			return "@*";
+		else{
+			s = "@(";
+			for(i = 0; i < this.l.length; i++){
+				if(i > 0) s += " or ";
+				s += (string)this.l[i];
+			}
+			s += ")";
+			return s;
+		}
+	case ASTDELAY:
+		return "#" + this.n1.toString(ind, 12);
+	case ASTPOSEDGE:
+		return "posedge " + (string)this.n1;
+	case ASTNEGEDGE:
+		return "negedge " + (string)this.n1;
+	case ASTREPEAT:
+		return "repeat(" + (string)this.n1 + ") " + (string)this.n2;
+	default:
+		return (string)this.t + "(...)";
+	}
+}
+
+string
+Node.toDebug(... string ind)
+{
+	int i;
+	string s, sn, tab;
+
+	tab = "  ";
+	if(ind === undefined) ind = "";
+	s = ind + (string)this.t;
+	if(this.type !== undefined)
+		s += " [" + this.type.toDebug() + "]";
+	if(this.isconst)
+		s += " const";
+	if(this.delay != null)
+		s += " " + (string)this.delay;
+	s += "\n";
+	if(this.sym != null && this.sym.st != null){
+		s += ind + tab + "SYMTAB:\n";
+		for(sn in this.sym.st.tab)
+			s += ind + tab + tab + this.sym.st.tab[sn].toDebug() + "\n";
+	}
+	switch(this.t){
+	case ASTMODULE:
+		s += ind + tab + "PARAMS: ";
+		for(i = 0; i < this.sym.params.length; i++)
+			s += (string)this.sym.params[i] + " ";
+		s += "\n" + ind + tab + "PORTS: ";
+		for(i = 0; i < this.sym.ports.length; i++)
+			s += (string)this.sym.ports[i] + " ";
+		s += "\n";
+	case ASTBLOCK:
+		for(i = 0; i < this.l.length; i++)
+			s += this.l[i].toDebug(ind + tab);
+		break;
+	case ASTUN: s += this.n1.toDebug(ind + tab); break;
+	case ASTBIN:
+	case ASTASSIGN:
+	case ASTASS:
+	case ASTDASS:
+		s += this.n1.toDebug(ind + tab);
+		s += this.n2.toDebug(ind + tab);
+		break;
+	case ASTNUM:
+		s += ind + tab + this.num.toString() + "\n";
+		break;
+	case ASTCINT:
+		s += ind + tab + this.numi.toString() + "\n";
+		break;
+	case ASTSYM:
+		s += ind + tab + (string)this.sym + "\n";
+		break;
+	case ASTINITIAL:
+	case ASTALWAYS:
+		s += this.n1.toDebug(ind + tab);
+		break;
+	case ASTIF:
+		s += this.n1.toDebug(ind + tab);
+		s += this.n2.toDebug(ind + tab);
+		if(this.n3 !== null){
+			s += ind + "ELSE\n";
+			s += this.n3.toDebug(ind + tab);
+		}
+		break;
+	case ASTFOR:
+		s += this.n1.toDebug(ind + tab);
+		s += this.n2.toDebug(ind + tab);
+		s += this.n3.toDebug(ind + tab);
+		s += this.n4.toDebug(ind + tab);
+		break;
+	case ASTWHILE:
+	case ASTREPEAT:
+		s += this.n1.toDebug(ind + tab);
+		s += this.n2.toDebug(ind + tab);
+		break;
+	case ASTFOREVER:
+		s += this.n1.toDebug(ind + tab);
+		break;
+	case ASTCASE:
+	case ASTCASEX:
+	case ASTCASEZ:
+		s += this.n1.toDebug(ind + tab);
+		for(i = 0; i < this.l.length; i++)
+			s += this.l[i].toDebug(ind + tab);
+		break;
+	case ASTCASIT:
+		if(this.l === null)
+			s += ind + tab + "DEFAULT\n";
+		else
+			for(i = 0; i < this.l.length; i++)
+				s += this.l[i].toDebug(ind + tab);
+		s += ind + ":\n";
+		s += this.n1.toDebug(ind + tab);
+		break;
+	case ASTMINST:
+		s += ind + tab + (string)this.sym + " " + (string)this.symn + "\n";
+		s += ind + tab + "PARAM:\n";
+		for(i = 0; i < this.pl.length; i++)
+			s += this.pl[i].toDebug(ind + tab + tab);
+		s += ind + tab + "PORTS:\n";
+		for(i = 0; i < this.l.length; i++)
+			s += this.l[i].toDebug(ind + tab + tab);
+		break;
+	case ASTMINSVAL:
+		if(this.sym !== null)
+			s += ind + tab + (string)this.sym + "\n";
+		if(this.n1 !== null)
+			s += this.n1.toDebug(ind + tab);
+		break;
+		
+	}
+	return s;
+}
+
+Node
+mkblock(Node l[])
+{
+	if(l.length == 1)
+		return l[0];
+	return new Node(Node{t: ASTBLOCK, l: l, lineno: l.length > 0 ? l[0].lineno : 0});
+}
+
+struct Symbol {
+	string name;
+	enum SymbolType {
+		SYMNONE,
+		SYMPORT,
+		SYMWIRE,
+		SYMREG,
+		SYMPARAM,
+		SYMLPARAM,
+		SYMGENVAR,
+		SYMEVENT,
+		SYMINST,
+		SYMMOD,
+	} t;
+	string dir;
+	int lineno;
+	bool portreg;
+	Type type;
+	Node def;
+	Node delay;
+	Scope st;
+	Symbol ports[], params[];
+};
+
+void
+Symbol(string name)
+{
+	this.name = name;
+	this.t = SYMNONE;
+	this.type = null;
+	this.def = null;
+}
+
+string
+Symbol.toString()
+{
+	return this.name;
+}
+
+string
+Symbol.toDebug()
+{
+	string s, i;
+	bool first;
+	
+	s = this.name + " (";
+	first = true;
+	for(i in this){
+		if(i == "toString" || i == "toDebug") continue;
+		if(!first)
+			s += ", ";
+		first = false;
+		s += i + "=" + (string)this[i];
+	}
+	return s + ")";
+}
+
+struct Scope {
+	Scope up;
+	Symbol sym;
+	Symbol tab[string];
+};
+
+function
+Scope(Scope up, Symbol sym)
+{
+	this.up = up;
+	this.sym = sym;
+	this.tab = {};
+	if(sym !== null)
+		sym.st = this;
+}
