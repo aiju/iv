@@ -9,7 +9,9 @@ RJ=\
 	dat.rj \
 	arith.rj\
 	parse.rj\
-	ast.rj\
+	ast.rj \
+	cfold.rj \
+	comp.rj \
 
 all: out.js
 

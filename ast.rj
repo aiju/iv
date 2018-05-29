@@ -1,7 +1,7 @@
 Node
 maxi(Node a, Node b)
 {
-	return new Node(Node{t: ASTBIN, op: "max", n1: a, n2: b});
+	return new Node(Node{t: ASTBIN, op: OPMAX, n1: a, n2: b});
 }
 
 void
@@ -72,7 +72,7 @@ condcheck(Node n)
 }
 
 void
-Parser.checkminst(Node n)
+checkminst(Node n)
 {
 	int i;
 	int seen;
@@ -97,7 +97,7 @@ Parser.checkminst(Node n)
 		for(i = 0; i < n.pl.length && i < s.params.length; i++){
 			n.l[i].sym = s.params[i];
 			if(n.pl[i].n1 === null) continue;
-			this.typecheck(n.pl[i].n1, s.params[i].type);
+			typecheck(n.pl[i].n1, s.params[i].type);
 			intcheck(n.pl[i].n1, true, " as parameter value");
 			if(!n.pl[i].n1.isconst)
 				error(n.pl[i].n1.lineno, "parameter values must be constants");
@@ -116,7 +116,7 @@ Parser.checkminst(Node n)
 				error(n.pl[i].lineno, "'" + n.pl[i].sym.name + "' no such parameter");
 			n.pl[i].sym = t;
 			if(n.pl[i].n1 === null) continue;
-			this.typecheck(n.pl[i].n1, t.type);
+			typecheck(n.pl[i].n1, t.type);
 			intcheck(n.pl[i].n1, true, " as parameter value");
 			if(!n.pl[i].n1.isconst)
 				error(n.pl[i].n1.lineno, "parameter values must be constants");
@@ -141,7 +141,7 @@ Parser.checkminst(Node n)
 		for(i = 0; i < n.l.length && i < s.ports.length; i++){
 			n.l[i].sym = s.ports[i];
 			if(n.l[i].n1 === null) continue;
-			this.typecheck(n.l[i].n1, s.ports[i].type);
+			typecheck(n.l[i].n1, s.ports[i].type);
 			intcheck(n.l[i].n1, true, " as port assignment");
 			if(s.ports[i].dir != "input")
 				lvalcheck(n.l[i].n1, true);
@@ -160,7 +160,7 @@ Parser.checkminst(Node n)
 				error(n.l[i].lineno, "'" + n.l[i].sym.name + "' no such port");
 			n.l[i].sym = t;
 			if(n.l[i].n1 === null) continue;
-			this.typecheck(n.l[i].n1, t.type);
+			typecheck(n.l[i].n1, t.type);
 			intcheck(n.l[i].n1, true, " as port assignment");
 			if(t.dir != "input")
 				lvalcheck(n.l[i].n1, true);
@@ -170,7 +170,7 @@ Parser.checkminst(Node n)
 }
 
 void
-Parser.typecheck(Node n, Type ctxt)
+typecheck(Node n, Type ctxt)
 {
 	int i, j;
 	TypeType t1, t2;
@@ -182,21 +182,21 @@ Parser.typecheck(Node n, Type ctxt)
 	case ASTASS:
 	case ASTDASS:
 	case ASTASSIGN:
-		this.typecheck(n.n1, null);
-		this.typecheck(n.n2, n.n1.type);
-		this.typecheck(n.delay, null);
+		typecheck(n.n1, null);
+		typecheck(n.n2, n.n1.type);
+		typecheck(n.n3, null);
 		lvalcheck(n.n1, n.t == ASTASSIGN);
 		break;
 	case ASTBIN:
 		switch(n.op){
-		case "==": case "!=": case "<": case "<=":
-		case ">": case ">=": case "===": case "!==":
-			this.typecheck(n.n1, null);
-			this.typecheck(n.n2, null);
+		case OPEQ: case OPNEQ: case OPLT: case OPLE:
+		case OPGT: case OPGE: case OPEQS: case OPNEQS:
+			typecheck(n.n1, null);
+			typecheck(n.n2, null);
 			break;
 		default:
-			this.typecheck(n.n1, ctxt);
-			this.typecheck(n.n2, ctxt);
+			typecheck(n.n1, ctxt);
+			typecheck(n.n2, ctxt);
 		}
 		n.isconst = n.n1.isconst && n.n2.isconst;
 		s = n.n1.type.sign && n.n2.type.sign;
@@ -207,10 +207,6 @@ Parser.typecheck(Node n, Type ctxt)
 			n.type = bittype;
 			return;
 		}
-		if(n.op == "or"){
-			n.type = eventtype;
-			return;
-		}
 		if(t1 == TYPEVENT || t2 == TYPEVENT){
 			error(n.lineno, "event in expression");
 			n.type = bittype;
@@ -218,21 +214,21 @@ Parser.typecheck(Node n, Type ctxt)
 		}
 		if(t1 == TYPREAL || t2 == TYPREAL){
 			switch(n.op){
-			case "+": case "/": case "%": case "*": case "-": case "**":
+			case OPADD: case OPSUB: case OPMUL: case OPDIV: case OPMOD: case OPEXP:
 				n.type = realtype;
 				return;
-			case "==": case "!=": case "<": case "<=": case ">": case ">=": case "&&": case "||":
+			case OPEQ: case OPNEQ: case OPLT: case OPLE: case OPGT: case OPGE: case OPAND: case OPOR:
 				n.type = bittype;
 				return;
 			default:
-				error(n.lineno, "real as operand to '" + n.op + "'");
+				error(n.lineno, "real as operand to '" + opstring[n.op] + "'");
 				n.type = bittype;
 				return;
 			}
 		}
 		switch(n.op){
-		case "+": case "/": case "%": case "*": case "-":
-		case "&": case "|": case "~^": case "^":
+		case OPADD: case OPSUB: case OPMUL: case OPDIV: case OPMOD:
+		case OPAND: case OPOR: case OPXNOR: case OPXOR:
 			if(t1 == TYPUNSZ || t2 == TYPUNSZ || ctxt !== null && ctxt.t == TYPUNSZ)
 				n.type = s ? sunsztype : unsztype;
 			else if(ctxt !== null && isbits(ctxt))
@@ -240,30 +236,28 @@ Parser.typecheck(Node n, Type ctxt)
 			else
 				n.type = new Type(TYPBITS, s, maxi(n.n1.type.sz, n.n2.type.sz));
 			return;
-		case "<<<": case ">>>": case "<<": case ">>": case "**":
+		case OPASL: case OPLSL: case OPLSR: case OPASR: case OPEXP:
 			n.type = n.n1.type;
 			return;
-		case "==": case "!=": case "===": case "!==": case "<": case "<=": case ">": case ">=": case "&&": case "||":
+		case OPEQ: case OPNEQ: case OPEQS: case OPNEQS: case OPLT: case OPLE: case OPGT: case OPGE: case OPLAND: case OPLOR:
 			n.type = bittype;
 			return;
 		default:
-			error(n.lineno, "this.typecheck: unknown op '" + n.op + "'");
+			error(n.lineno, "typecheck: unknown op '" + opstring[n.op] + "'");
 		}
 		break;
 	case ASTUN:
-		this.typecheck(n.n1, ctxt);
+		typecheck(n.n1, ctxt);
 		n.isconst = n.n1.isconst;
 		t1 = n.n1.type.t;
 		if(t1 == TYPMEM)
 			error(n.lineno, "memory in expression");
 		else if(t1 == TYPEVENT)
 			error(n.lineno, "event in expression");
-		if(n.op == "!")
+		if(n.op == OPLNOT)
 			n.type = bittype;
-		else if(n.op == "posedge" || n.op == "negedge")
-			n.type = eventtype;
 		else if(t1 == TYPREAL){
-			if(n.op != "+" && n.op != "-")
+			if(n.op != OPUPLUS && n.op != OPUMINUS)
 				error(n.lineno, "real in expression");
 			n.type = n.n1.type;
 		}else if(ctxt !== null && ctxt.t == TYPUNSZ || t1 == TYPUNSZ)
@@ -278,33 +272,33 @@ Parser.typecheck(Node n, Type ctxt)
 		n.isconst = true;
 		for(i = 0; i < n.l.length; i++){
 			m = n.l[i];
-			this.typecheck(m, null);
+			typecheck(m, null);
 			if(m.type == null || !isbits(m.type))
 				error(n.lineno, (string)m.type + " in concatenation");
 			else
-				r = new Node(Node{t: ASTBIN, op: "+", n1: r, n2: m.type.sz, type: unsztype, lineno: n.lineno});
+				r = cfold(new Node(Node{t: ASTBIN, op: OPADD, n1: r, n2: m.type.sz, lineno: n.lineno}), sunsztype);
 			if(!m.isconst)
 				n.isconst = false;
 		}
 		n.type = new Type(TYPBITS, false, r);
 		break;
 	case ASTREPL:
-		this.typecheck(n.n1, null);
-		this.typecheck(n.n2, null);
+		typecheck(n.n1, null);
+		typecheck(n.n2, null);
 		if(n.n1.type == null || !isbits(n.n1.type)){
 			error(n.n1.lineno, (string)n.n2.type + " in replication");
 		}else if(!intcheck(n.n2, false, " in replication")){
 		}else if(!n.n2.isconst)
 			error(n.n2.lineno, "replication factor not constant");
 		else
-			r = new Node(Node{t: ASTBIN, op: "*", n1: n.n2, n2: n.n1.type.sz, type: unsztype, lineno: n.lineno});
+			r = cfold(new Node(Node{t: ASTBIN, op: OPMUL, n1: n.n2, n2: n.n1.type.sz, lineno: n.lineno}), sunsztype);
 		n.type = new Type(TYPBITS, false, r);
 		break;
 	case ASTSYM:
 		n.type = n.sym.type;
 		break;
 	case ASTNUM:
-		if(n.num.sz === null)
+		if(n.num.sz < 0)
 			n.type = new Type(TYPUNSZ, n.num.sign, null, null, null);
 		else
 			n.type = new Type(TYPBITS, n.num.sign, new Node(Node{t: ASTCINT, lineno: n.lineno, numi: n.num.sz}), null, null);
@@ -316,74 +310,74 @@ Parser.typecheck(Node n, Type ctxt)
 		break;
 	case ASTINITIAL:
 	case ASTALWAYS:
-		this.typecheck(n.n1, null);
+		typecheck(n.n1, null);
 		break;
 	case ASTMODULE:
 	case ASTBLOCK:
 		for(i = 0; i < n.l.length; i++)
-			this.typecheck(n.l[i], null);
+			typecheck(n.l[i], null);
 		break;
 	case ASTDELAY:
-		this.typecheck(n.n1, null);
+		typecheck(n.n1, null);
 		intcheck(n.n1, true, " in delay");
 		break;
 	case ASTAT:
 		if(n.l !== null){
 			for(i = 0; i < n.l.length; i++){
-				this.typecheck(n.l[i], null);
+				typecheck(n.l[i], null);
 				if(n.l[i].type.t == TYPMEM)
 					error(n.lineno, "memory as event");
 			}
 		}
 		break;
 	case ASTREPEAT:
-		this.typecheck(n.n1, null);
-		this.typecheck(n.n2, null);
+		typecheck(n.n1, null);
+		typecheck(n.n2, null);
 		intcheck(n.n1, false, " in repeat");
 		break;
 	case ASTIF:
 	case ASTWHILE:
-		this.typecheck(n.n1, null);
-		this.typecheck(n.n2, null);
-		this.typecheck(n.n3, null);
+		typecheck(n.n1, null);
+		typecheck(n.n2, null);
+		typecheck(n.n3, null);
 		condcheck(n.n1);
 		break;
 	case ASTFOREVER:
-		this.typecheck(n.n1, null);
+		typecheck(n.n1, null);
 		break;
 	case ASTFOR:
-		this.typecheck(n.n1, null);
-		this.typecheck(n.n2, null);
-		this.typecheck(n.n3, null);
-		this.typecheck(n.n4, null);
+		typecheck(n.n1, null);
+		typecheck(n.n2, null);
+		typecheck(n.n3, null);
+		typecheck(n.n4, null);
 		condcheck(n.n2);
 		break;
 	case ASTCASE:
 	case ASTCASEX:
 	case ASTCASEZ:
-		this.typecheck(n.n1, null);
+		typecheck(n.n1, null);
 		intcheck(n.n1, false, " in case");
 		for(i = 0; i < n.l.length; i++){
 			if(n.l[i].t != ASTCASIT)
 				throw "shouldn't happen";
 			if(n.l[i].l !== null)
 				for(j = 0; j < n.l[i].l.length; j++){
-					this.typecheck(n.l[i].l[j], n.n1.type);
+					typecheck(n.l[i].l[j], n.n1.type);
 					intcheck(n.l[i].l[j], false, " as case item");
 				}
-			this.typecheck(n.l[i].n1, n.n1.type);
+			typecheck(n.l[i].n1, n.n1.type);
 		}
 		break;
 	case ASTMINST:
-		n.sym = getsym(this.scope, n.sym.name, false);
+		n.sym = getsym(n.sym.scope.top(), n.sym.name, false);
 		if(n.sym.t === SYMNONE)
 			error(n.lineno, "'" + (string)n.sym + "' undeclared");
 		else if(n.sym.t !== SYMMOD)
 			error(n.lineno, "'" + (string)n.sym + "' not a module");
 		else
-			this.checkminst(n);
+			checkminst(n);
 		break;
 	default:
-		error(n.lineno, "this.typecheck: unknown " + (string)n.t);
+		error(n.lineno, "typecheck: unknown " + (string)n.t);
 	}
 }

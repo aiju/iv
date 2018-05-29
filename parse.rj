@@ -69,7 +69,7 @@ getsym(Scope scope, string name, bool hier)
 				return sc.tab[name];
 	s = scope.tab[name];
 	if(s === undefined)
-		s = scope.tab[name] = new Symbol(name);
+		s = scope.tab[name] = new Symbol(scope, name);
 	return s;
 }
 
@@ -95,6 +95,7 @@ decl(int lineno, Scope scope, SymbolType t, Symbol s, Type typ, Node def)
 	s.def = def;
 	s.type = typ;
 	s.lineno = lineno;
+	s.scope = scope;
 	return s;
 }
 
@@ -139,20 +140,22 @@ isident(string s)
 	return s >= "A" && s <= "Z" || s >= "a" && s <= "z" || s >= "0" && s <= "9" || s == "_" || s == "$";
 }
 
-string
+Bits
 decconv(int lno, string s)
 {
-	string r, digs, p;
+	string digs, p;
+	Bits r, ten;
 	int i;
 
-	r = "0";
+	r = new Bits("");
+	ten = new Bits("01010");
 	digs = "00000 10000 01000 11000 00100 10100 01100 11100 00010 10010";
 	for(i = 0; i < s.length; i++){
 		p = s.charAt(i);
 		if(p < "0" || p > "9")
 			error(lno, "invalid character '" + p + "' in decimal number");
-		r = mpmul(r, "01010");
-		r = mpadd(r, digs.substr((s.charCodeAt(i) - 48) * 6, 5));
+		r = mpmul(r, ten);
+		r = mpadd(r, new Bits(digs.substr((s.charCodeAt(i) - 48) * 6, 5)));
 	}
 	return r;
 }
@@ -162,6 +165,7 @@ numparse(int lno, Token a, Token b, Token c)
 {
 	string r, digs;
 	int i, p;
+	Bits rr;
 
 	if(b == null)
 		b = Token{base: 10, sign: true};
@@ -193,7 +197,7 @@ numparse(int lno, Token a, Token b, Token c)
 		if(c.str.length == 1 && (i = "xXzZ?".indexOf(c.str)) >= 0)
 			r = "xxzzz"[i];
 		else
-			r = decconv(lno, c.str);
+			r = decconv(lno, c.str).s;
 		break;
 	case 16:
 		digs = "0000 1000 0100 1100 0010 1010 1100 1110 0001 1001 0101 1101 0011 1011 0111 1111 xxxx zzzz zzzz";
@@ -211,11 +215,16 @@ numparse(int lno, Token a, Token b, Token c)
 	default:
 		error(lno, "unimplemented base " + b.base.toString());
 	}
+	rr = new Bits(r);
 	if(a !== null){
 		p = parseInt(a.str, 10);
-		return new Const(b.sign ? mpxtend(r, p) : mptrunc(r, p), p, b.sign);
-	}
-	return new Const(mpnorm(r), null, b.sign);
+		if(b.sign)
+			rr = rr.xtend(p);
+		else
+			rr = rr.trunc(p);
+	}else
+		p = -1;
+	return new Const(rr, p, b.sign);
 }
 
 string longop[string] = {
@@ -436,7 +445,7 @@ Parser.p_attributes()
 }
 
 Node
-Parser.p_range[]()
+Parser.p_range()[]
 {
 	Node a, b;
 
@@ -544,17 +553,17 @@ Parser.p_lvalue()
 	}
 }
 
-bool untab[string] = {
-	"+": true,
-	"-": true,
-	"!": true,
-	"~": true,
-	"&": true,
-	"~&": true,
-	"|": true,
-	"~|": true,
-	"^": true,
-	"~^": true
+OpType untab[string] = {
+	"+": OPUPLUS,
+	"-": OPUMINUS,
+	"!": OPLNOT,
+	"~": OPCOM,
+	"&": OPRAND,
+	"~&": OPRNAND,
+	"|": OPROR,
+	"~|": OPROR,
+	"^": OPRXOR,
+	"~^": OPRXNOR
 };
 
 Node
@@ -578,15 +587,15 @@ Parser.p_primary()
 			c = t;
 		}
 		cn = numparse(this.lineno, a, b, c);
-		if(cn.sign && cn.v.length < 32 && cn.v.indexOf("x") < 0 && cn.v.indexOf("z") < 0)
-			return new Node(Node{t: ASTCINT, numi: mptoi(cn.v), lineno: this.lineno});
+		if(cn.iscint())
+			return new Node(Node{t: ASTCINT, numi: cn.v.toInt(), lineno: this.lineno});
 		return new Node(Node{t: ASTNUM, num: cn, lineno: this.lineno});
 	case "base":
 		b = t;
 		c = this.expect("num");
 		cn = numparse(this.lineno, null, b, c);
-		if(cn.sign && cn.v.length < 32 && cn.v.indexOf("x") < 0 && cn.v.indexOf("z") < 0)
-			return new Node(Node{t: ASTCINT, numi: mptoi(cn.v), lineno: this.lineno});
+		if(cn.iscint())
+			return new Node(Node{t: ASTCINT, numi: cn.v.toInt(), lineno: this.lineno});
 		return new Node(Node{t: ASTNUM, num: cn, lineno: this.lineno});
 	case "(":
 		n = this.p_expr();
@@ -595,52 +604,79 @@ Parser.p_primary()
 	default:
 		if(untab[t.t] !== undefined){
 			this.p_attributes();
-			return new Node(Node{t: ASTUN, op: t.t, n1: this.p_primary(), lineno: this.lineno});
+			return new Node(Node{t: ASTUN, op: untab[t.t], n1: this.p_primary(), lineno: this.lineno});
 		}
 		error(this.lineno, "unexpected " + t.t);
+		return null;
 	}
 }
 
-var optab[string] = {
-	"**": {prec: 11},
-	"*": {prec: 10},
-	"/": {prec: 10},
-	"%": {prec: 10},
-	"+": {prec: 9},
-	"-": {prec: 9},
-	"<<": {prec: 8},
-	">>": {prec: 8},
-	"<<<": {prec: 8},
-	">>>": {prec: 8},
-	"<": {prec: 7},
-	"<=": {prec: 7},
-	">": {prec: 7},
-	">=": {prec: 7},
-	"==": {prec: 6},
-	"!=": {prec: 6},
-	"===": {prec: 6},
-	"!==": {prec: 6},
-	"&": {prec: 5},
-	"^": {prec: 4},
-	"~^": {prec: 4},
-	"|": {prec: 3},
-	"&&": {prec: 2},
-	"||": {prec: 1},
-	"max": {prec: 0},
+OpType tok2op[string] = {
+	"**": OPEXP,
+	"*": OPMUL,
+	"/": OPDIV,
+	"%": OPMOD,
+	"+": OPADD,
+	"-": OPSUB,
+	"<<": OPLSL,
+	">>": OPLSR,
+	"<<<": OPASL,
+	">>>": OPASR,
+	"<": OPLT,
+	"<=": OPLE,
+	">": OPGT,
+	">=": OPGE,
+	"==": OPEQ,
+	"!=": OPNEQ,
+	"===": OPEQS,
+	"!==": OPNEQS,
+	"&": OPAND,
+	"^": OPXOR,
+	"~^": OPXNOR,
+	"|": OPOR,
+	"&&": OPLAND,
+	"||": OPLOR,
+};
+
+int prectab[OpType] = {
+	OPEXP: 11,
+	OPMUL: 10,
+	OPDIV: 10,
+	OPMOD: 10,
+	OPADD: 9,
+	OPSUB: 9,
+	OPLSL: 8,
+	OPLSR: 8,
+	OPASL: 8,
+	OPASR: 8,
+	OPLT: 7,
+	OPLE: 7,
+	OPGT: 7,
+	OPGE: 7,
+	OPEQ: 6,
+	OPNEQ: 6,
+	OPEQS: 6,
+	OPNEQS: 6,
+	OPAND: 5,
+	OPXOR: 4,
+	OPXNOR: 4,
+	OPOR: 3,
+	OPLAND: 2,
+	OPLOR: 1,
 };
 
 Node
 Parser.p_expr_core()
 {
 	Node ex[];
-	var op[];
-	string t;
+	OpType op[];
+	OpType t;
 	Node a;
 	
 	ex = [this.p_primary()];
 	op = [];
-	while(optab[t = this.peek().t] !== undefined){
-		while(op.length > 0 && optab[op[0]].prec >= optab[t].prec){
+	while(t = tok2op[this.peek().t], t !== undefined){
+		while(op.length > 0 && prectab[op[0]] >= prectab[t]){
 			a = ex.shift();
 			ex[0] = new Node(Node{t: ASTBIN, op: op.shift(), n1: ex[0], n2: a, lineno: this.lineno});
 		}
@@ -703,7 +739,7 @@ Parser.p_assignment(Node delay)
 	l = this.p_lvalue();
 	this.expect("=");
 	r = this.p_expr();
-	return new Node(Node{t: ASTASSIGN, n1: l, n2: r, lineno: this.lineno, delay: delay});
+	return new Node(Node{t: ASTASSIGN, n1: l, n2: r, lineno: this.lineno, n3: delay});
 }
 
 void
@@ -735,7 +771,7 @@ Parser.p_param_decl(bool islocal)
 }
 
 Node
-Parser.p_event_expr[]()
+Parser.p_event_expr()[]
 {
 	Node n;
 	Node l[];
@@ -797,7 +833,7 @@ Parser.p_stat_assign()
 	}
 	r = this.p_expr();
 	this.expect(";");
-	return new Node(Node{t: nonblock ? ASTDASS : ASTASS, n1: l, n2: r, delay: d, lineno: lineno});
+	return new Node(Node{t: nonblock ? ASTDASS : ASTASS, n1: l, n2: r, n3: d, lineno: lineno});
 }
 
 Node
@@ -810,7 +846,7 @@ Parser.p_var_assign()
 	lineno = this.lineno;
 	this.expect("=");
 	r = this.p_expr();
-	return new Node(Node{t: ASTASS, n1: l, n2: r, delay: null, lineno: lineno});
+	return new Node(Node{t: ASTASS, n1: l, n2: r, n3: null, lineno: lineno});
 }
 
 Node
@@ -844,7 +880,7 @@ Parser.p_case(string t)
 }
 
 Node
-Parser.p_stat[]()
+Parser.p_stat()[]
 {
 	Token t;
 	Node a, b, c, d;
@@ -907,10 +943,22 @@ Parser.p_stat[]()
 	case "kw:case": case "kw:casex": case "kw:casez":
 		this.lex();
 		return [this.p_case(t.t)];
+	case "@": case "@*": 
+		a = this.p_event_control();
+		l = this.p_stat();
+		l.unshift(a);
+		return l;
+	case "#":
+		a = this.p_delay();
+		l = this.p_stat();
+		l.unshift(a);
+		return l;
 	case ";":
+		this.lex();
 		return [];
 	default:
 		error(this.lineno, "unexpected " + (string)t.t);
+		return null;
 	}
 }
 
@@ -983,7 +1031,7 @@ Parser.p_module_item_decl(string t)
 }
 
 Node
-Parser.p_module_inst[](Token t)
+Parser.p_module_inst(Token t)[]
 {
 	Symbol mname, iname;
 	Node pl[], l[], r[], b;
@@ -1051,7 +1099,7 @@ Parser.p_module_inst[](Token t)
 }
 
 Node
-Parser.p_module_item[]()
+Parser.p_module_item()[]
 {
 	Token t;
 	int l;
@@ -1125,6 +1173,7 @@ Parser.p_module()
 		while(this.got("kw:endmodule") === null)
 			r.push.apply(r, this.p_module_item());
 		n = new Node(Node{t: ASTMODULE, sym: s, l: r, lineno: lno});
+		s.def = n;
 	}finally{
 		this.curmod = null;
 		this.scopeup();
@@ -1137,6 +1186,7 @@ parse()
 {
 	string s;
 	Parser p;
+	System sys;
 	Node m[];
 	var e, i;
 	
@@ -1150,13 +1200,18 @@ parse()
 			m.push(p.p_module());
 		try{
 			for(i = 0; i < m.length; i++)
-				p.typecheck(m[i], null);
+				m[i] = cfold(m[i], null);
 		}catch(e){
 			document.getElementById("out").innerHTML = e + "\n";
 		}
 		for(i = 0; i < m.length; i++)
 			document.getElementById("out").innerHTML += m[i].toDebug();
+		document.getElementById("out").innerHTML += "\n";
+		
+		sys = new System();
+		sys.compile(m[0], m[0].sym.name);
+		sys.run();
 	}catch(e){
-		document.getElementById("out").innerHTML = e;
+		document.getElementById("out").innerHTML += e;
 	}
 }

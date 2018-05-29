@@ -2,6 +2,9 @@ struct Symbol;
 struct Type;
 struct Const;
 struct Scope;
+struct Bits;
+struct Signal;
+struct System;
 
 struct Node {
 	enum NodeType {
@@ -39,9 +42,44 @@ struct Node {
 	} t;
 	Type type;
 	bool isconst;
-	string op;
+	enum OpType {
+		OPADD,
+		OPAND,
+		OPASL,
+		OPASR,
+		OPCOM,
+		OPDIV,
+		OPEQ,
+		OPEQS,
+		OPEXP,
+		OPGE,
+		OPGT,
+		OPLAND,
+		OPLOR,
+		OPLE,
+		OPLNOT,
+		OPLSL,
+		OPLSR,
+		OPLT,
+		OPMAX,
+		OPMOD,
+		OPMUL,
+		OPNEQ,
+		OPNEQS,
+		OPOR,
+		OPRAND,
+		OPRNAND,
+		OPRNOR,
+		OPROR,
+		OPRXNOR,
+		OPRXOR,
+		OPSUB,
+		OPUMINUS,
+		OPUPLUS,
+		OPXOR,
+		OPXNOR,
+	} op;
 	Node n1, n2, n3, n4;
-	Node delay;
 	Symbol sym, symn;
 	Node l[], pl[];
 	Const num;
@@ -87,7 +125,7 @@ Type(TypeType t, ... bool sign, Node lo, Node hi, Type elem)
 		this.hi = null;
 	}
 	if(t == TYPBITV || t == TYPMEM)
-		this.sz = new Node(Node{t: ASTBIN, op: "+", n1: new Node(Node{t: ASTBIN, op: "-", n1: this.hi, n2: this.lo}), n2: new Node(Node{t: ASTCINT, numi: 1})});
+		this.sz = cfold(new Node(Node{t: ASTBIN, op: OPADD, n1: new Node(Node{t: ASTBIN, op: OPSUB, n1: this.hi, n2: this.lo}), n2: new Node(Node{t: ASTCINT, numi: 1})}), unsztype);
 	else if(t == TYPBITS)
 		this.sz = lo;
 	else if(t == TYPBIT)
@@ -146,13 +184,13 @@ Type.toDebug()
 }
 
 struct Const {
-	string v;
+	Bits v;
 	int sz;
 	bool sign;
 };
 
 void
-Const(string v, int sz, bool sign)
+Const(Bits v, int sz, bool sign)
 {
 	this.v = v;
 	this.sz = sz;
@@ -166,15 +204,21 @@ Const.toString()
 	int i;
 
 	s = "";
-	if(this.sz !== null)
+	if(this.sz >= 0)
 		s += this.sz.toString();
 	if(this.sign)
 		s += "'sb";
 	else
 		s += "'b";
-	for(i = 0; i < this.v.length; i++)
-		s += this.v.charAt(this.v.length - 1 - i);
+	for(i = 0; i < this.v.s.length; i++)
+		s += this.v.s.charAt(this.v.s.length - 1 - i);
 	return s;
+}
+
+bool
+Const.iscint()
+{
+	return !this.v.gotXZ() && this.v.s.length <= 32 && this.sign && this.sz < 0;
 }
 
 function
@@ -187,12 +231,49 @@ Node(Node attr)
 	this.isconst = false;
 }
 
+string opstring[OpType] = {
+	OPADD: "+",
+	OPAND: "&",
+	OPASL: "<<<",
+	OPASR: ">>>",
+	OPCOM: "~",
+	OPDIV: "/",
+	OPEQ: "==",
+	OPEQS: "===",
+	OPEXP: "**",
+	OPGE: ">>",
+	OPGT: ">",
+	OPLAND: "&&",
+	OPLOR: "||",
+	OPLE: "<=",
+	OPLNOT: "~",
+	OPLSL: "<<",
+	OPLSR: ">>",
+	OPLT: "<",
+	OPMAX: "max",
+	OPMOD: "%",
+	OPMUL: "*",
+	OPNEQ: "!=",
+	OPNEQS: "!==",
+	OPOR: "|",
+	OPRAND: "&",
+	OPRNAND: "~&",
+	OPRNOR: "~&",
+	OPROR: "|",
+	OPRXNOR: "~^",
+	OPRXOR: "^",
+	OPSUB: "-",
+	OPUMINUS: "-",
+	OPUPLUS: "+",
+	OPXOR: "^",
+	OPXNOR: "~^",
+};
+
 string
 Node.toString(...string ind, int lvl)
 {
 	string s;
-	var t;
-	int i;
+	int i, t;
 
 	if(ind === undefined) ind = "";
 	if(lvl === undefined) lvl = 0;
@@ -206,9 +287,9 @@ Node.toString(...string ind, int lvl)
 	case ASTSYM:
 		return this.sym.toString();
 	case ASTBIN:
-		t = optab[this.op];
-		s = this.n1.toString(ind, t.prec) + " " + this.op + " " + this.n2.toString(ind, t.prec + 1);
-		if(optab[this.op].prec < lvl)
+		t = prectab[this.op];
+		s = this.n1.toString(ind, t) + " " + opstring[this.op] + " " + this.n2.toString(ind, t + 1);
+		if(t < lvl)
 			s = "(" + s + ")";
 		return s;
 	case ASTCONCAT:
@@ -226,7 +307,7 @@ Node.toString(...string ind, int lvl)
 	case ASTCINT:
 		return this.numi.toString();
 	case ASTUN:
-		return this.op + this.n1.toString();
+		return opstring[this.op] + this.n1.toString();
 	case ASTAT:
 		if(this.l === null)
 			return "@*";
@@ -265,8 +346,6 @@ Node.toDebug(... string ind)
 		s += " [" + this.type.toDebug() + "]";
 	if(this.isconst)
 		s += " const";
-	if(this.delay != null)
-		s += " " + (string)this.delay;
 	s += "\n";
 	if(this.sym != null && this.sym.st != null){
 		s += ind + tab + "SYMTAB:\n";
@@ -286,13 +365,22 @@ Node.toDebug(... string ind)
 		for(i = 0; i < this.l.length; i++)
 			s += this.l[i].toDebug(ind + tab);
 		break;
-	case ASTUN: s += this.n1.toDebug(ind + tab); break;
+	case ASTUN:
+		s += ind + tab + (string)this.op + "\n";
+		s += this.n1.toDebug(ind + tab);
+		break;
 	case ASTBIN:
+		s += ind + tab + (string)this.op + "\n";
+		s += this.n1.toDebug(ind + tab);
+		s += this.n2.toDebug(ind + tab);
+		break;
 	case ASTASSIGN:
 	case ASTASS:
 	case ASTDASS:
 		s += this.n1.toDebug(ind + tab);
 		s += this.n2.toDebug(ind + tab);
+		if(this.n3 !== null)
+			s += this.n3.toDebug(ind + tab);
 		break;
 	case ASTNUM:
 		s += ind + tab + this.num.toString() + "\n";
@@ -360,7 +448,9 @@ Node.toDebug(... string ind)
 		if(this.n1 !== null)
 			s += this.n1.toDebug(ind + tab);
 		break;
-		
+	case ASTDELAY:
+		s += this.n1.toDebug(ind + tab);
+		break;
 	}
 	return s;
 }
@@ -393,17 +483,19 @@ struct Symbol {
 	Type type;
 	Node def;
 	Node delay;
+	Scope scope;
 	Scope st;
 	Symbol ports[], params[];
 };
 
 void
-Symbol(string name)
+Symbol(Scope scope, string name)
 {
 	this.name = name;
 	this.t = SYMNONE;
 	this.type = null;
 	this.def = null;
+	this.scope = scope;
 }
 
 string
@@ -444,4 +536,15 @@ Scope(Scope up, Symbol sym)
 	this.tab = {};
 	if(sym !== null)
 		sym.st = this;
+}
+
+Scope
+Scope.top()
+{
+	Scope s;
+	
+	s = this;
+	while(s.up != null)
+		s = s.up;
+	return s;
 }

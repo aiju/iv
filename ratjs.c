@@ -396,11 +396,14 @@ node(Line *l, int t, ...)
 	va_start(va, t);
 	switch(t){
 	case ASTSYM:
-	case ASTLABEL:
 	case ASTBREAK:
 	case ASTCONTINUE:
 	case ASTDECL:
 		n->sym = va_arg(va, Symbol *);
+		break;
+	case ASTLABEL:
+		n->sym = va_arg(va, Symbol *);
+		n->n1 = va_arg(va, Node *);
 		break;
 	case ASTOP:
 	case ASTASS:
@@ -474,7 +477,7 @@ node(Line *l, int t, ...)
 		n->sym = va_arg(va, Symbol *);
 		break;
 	case ASTOBJECT:
-		n->sym = va_arg(va, Symbol *);
+		n->typearg = va_arg(va, Type *);
 		break;
 	case ASTTHIS:
 	case ASTDEFAULT:
@@ -723,6 +726,7 @@ enum {
 };
 char idbuf[512];
 Symbol *lexsym;
+SymTab *lexsymscope;
 int lexnextch;
 int peektok;
 
@@ -958,6 +962,10 @@ lex(void)
 	if(peektok != 0){
 		c = peektok;
 		peektok = 0;
+		if((c == TSYM || c == TTYPE) && lexsymscope != scope){
+			lexsym = getsym(scope, 1, lexsym->name);
+			lexsymscope = scope;
+		}
 		return c;
 	
 	}
@@ -1008,6 +1016,7 @@ again:
 			if(strcmp(kw->name, idbuf) == 0)
 				return kw->tok;
 		lexsym = getsym(scope, 1, idbuf);
+		lexsymscope = scope;
 		if(lexsym->t == SYMTYPE)
 			return TTYPE;
 		else
@@ -1050,8 +1059,6 @@ again:
 int
 peek(void)
 {
-	if(peektok != 0)
-		return peektok;
 	return peektok = lex();
 }
 
@@ -1187,7 +1194,7 @@ p_exprl(int end)
 }
 
 Node *
-p_object(Symbol *typ)
+p_object(Type *typ)
 {
 	Node *n;
 	char *s;
@@ -1261,13 +1268,39 @@ p_type(int t)
 	}
 }
 
+Type *p_spec_tail(Type *);
+Node *p_function(Symbol *, Type *, Type *);
+
+Node *
+p_lambda(Type *ty)
+{
+	Node *n, *m;
+	int i;
+
+	if(ty->t != TYPFUNC){
+		error(nil, "%τ is not a function type", ty);
+		ty = type(TYPVAR);
+	}
+	expect(TRETURN);
+	n = newscope(ASTFUNC, nil);
+	n->type = ty;
+	for(i = 0; i < ty->pl.n; i++)
+		if(ty->pl.a[i]->str != nil)
+			decl(scope, SYMVAR, getsym(scope, 0, ty->pl.a[i]->str), ty->pl.a[i]->type, nil);
+	m = p_expr(0);
+	if(m != nil)
+		n->nl = nladd(n->nl, 1, node(n, ASTRETURN, m));
+	scopeup();
+	return n;
+}
+
 Node *
 p_primary(void)
 {
 	Node *n;
-	Symbol *s;
 	int t;
 	Type *ty;
+	int parens;
 
 	switch(t = lex()){
 	case TTHIS: n = node(nil, ASTTHIS); break;
@@ -1284,7 +1317,11 @@ p_primary(void)
 		if(t = gottype()){
 			ty = p_type(t);
 			if(ty == nil) ty = type(TYPVAR);
-			expect(')');
+			if(!got(')')){
+				/* BUG: what if there's operators after the object? */
+				parens = 1;
+				goto notcast;
+			}
 			n = node(nil, ASTCAST, ty, p_primary());
 		}else{
 			n = p_expr(1);
@@ -1293,7 +1330,28 @@ p_primary(void)
 		break;
 	case '[': n = node(nil, ASTARRAY, p_exprl(']')); break;
 	case '{': n = p_object(nil); break;
-	case TTYPE: s = lexsym; expect('{'); n = p_object(s); break;
+	case TVAR: case TINT: case TSTRING: case TBOOL: case TVOID: case TTYPE:
+		ty = p_type(t);
+		parens = 0;
+	notcast:
+		if(got('{')){
+			if(ty->t != TYPSTRUCT)
+				error(nil, "struct literal with non-struct type %τ", ty);
+			n = p_object(ty);
+			if(parens) expect(')');
+			break;
+		}
+		if(peek() == '('){
+			ty = p_spec_tail(ty);
+			if(got('{'))
+				n = p_function(nil, nil, ty);
+			else
+				n = p_lambda(ty);
+			if(parens) expect(')');
+			break;
+		}
+		error(nil, "unexpected type in expression");
+		return nil;
 	case TNEW: n = p_new(); break;
 	default:
 		error(nil, "unexpected %T in expression", t);
@@ -1383,14 +1441,18 @@ p_parlist(Type *ret)
 	
 	ft = type(TYPFUNC, ret);
 	if(got(TVOID)){
-		expect(')');
-		return ft;
+		if(got(')'))
+			return ft;
+		t = TVOID;
+		dots = 0;
+		goto loop;
 	}
 	dots = 0;
 	while(!goteof(')')){
 		if(!dots && got(TDOTS))
 			dots = 1;
 		t = lex();
+loop:
 		if(t == TSYM){
 			superman(t);
 			ty = type(TYPVAR);
@@ -1415,6 +1477,35 @@ p_parlist(Type *ret)
 		expect(',');
 	}
 	return ft;
+}
+
+Type *
+p_spec_tail(Type *t)
+{
+	int to;
+	Type **ip;
+	
+	ip = &t;
+	for(;;)
+		switch(peek()){
+		case '(':
+			lex();
+			*ip = p_parlist(*ip);
+			ip = &(*ip)->ret;
+			break;
+		case '[':
+			lex();
+			if(to = gottype())
+				*ip = type(TYPMAP, p_type(to), *ip);
+			else
+				*ip = type(TYPARRAY, *ip);
+			ip = &(*ip)->ret;
+			expect(']');
+			break;
+		default:
+			return t;
+		}
+
 }
 
 void
@@ -1443,24 +1534,7 @@ dot:
 		expectany(TSYM, TTYPE, 0);
 		*sp = lexsym;
 	}
-	for(;;)
-		switch(peek()){
-		case '(':
-			lex();
-			t = p_parlist(t);
-			break;
-		case '[':
-			lex();
-			if(to = gottype())
-				t = type(TYPMAP, p_type(to), t);
-			else
-				t = type(TYPARRAY, t);
-			expect(']');
-			break;
-		default:
-			*tp = t;
-			return;
-		}
+	*tp = p_spec_tail(t);
 }
 
 void
@@ -1507,13 +1581,16 @@ p_function(Symbol *sym, Type *par, Type *ty)
 		error(nil, "%τ is not a function type", ty);
 		ty = type(TYPVAR);
 	}
-	if(par == nil && sym->st == scope && sym->t == SYMTYPE && sym->type->t == TYPSTRUCT)
-		par = sym->type;
-	else
-		sym = decl(par != nil ? &par->st : scope, SYMFUNC, sym, ty, nil);
+	if(sym != nil){
+		if(par == nil && sym->st == scope && sym->t == SYMTYPE && sym->type->t == TYPSTRUCT)
+			par = sym->type;
+		else
+			sym = decl(par != nil ? &par->st : scope, SYMFUNC, sym, ty, nil);
+	}
 	n = newscope(ASTFUNC, sym);
 	n->par = par;
-	sym->def = n;
+	if(sym != nil)
+		sym->def = n;
 	n->type = ty;
 	for(i = 0; i < ty->pl.n; i++)
 		if(ty->pl.a[i]->str != nil)
@@ -1644,7 +1721,7 @@ p_stat(void)
 	case TSYM:
 		if(lexnextch == ':'){
 			lex();
-			return node(nil, ASTLABEL, decl(scope, SYMLABEL, lexsym, nil, nil));
+			return node(nil, ASTLABEL, decl(scope, SYMLABEL, lexsym, nil, nil), p_stat());
 		}
 	case '+': case '-': case '~': case '!': case TPP: case TMM: case '(': case TTHIS:
 	case TNUM: case TSTRLIT:
@@ -2085,6 +2162,107 @@ idxtype(Line *lno, Type *a, Type *i)
 	}
 }
 
+int
+hasbreak(Node *n, int nullok, Symbol *label)
+{
+	int i;
+
+	if(n == nil) return 0;
+	switch(n->t){
+	case ASTSYM: case ASTOP: case ASTASS: case ASTTERN:
+	case ASTFUNC: case ASTRETURN: case ASTCONTINUE: case ASTDECL:
+	case ASTDECLS: case ASTARRAY: case ASTOBJECT: case ASTOBJELEM:
+	case ASTUN: case ASTINDE: case ASTDOT: case ASTCALL:
+	case ASTPARAM: case ASTNUM: case ASTSTR: case ASTTHIS:
+	case ASTNEW: case ASTCASE: case ASTDEFAULT: case ASTIDX:
+	case ASTTHROW: case ASTCAST:
+		return 0;
+	case ASTIF:
+		return hasbreak(n->n2, nullok, label) || hasbreak(n->n3, nullok, label);
+	case ASTLABEL:
+		return hasbreak(n->n1, nullok, label);
+	case ASTWHILE:
+	case ASTDOWHILE:
+		return label != nil && hasbreak(n->n2, 0, label);
+	case ASTFORIN:
+		return label != nil && hasbreak(n->n3, 0, label);
+	case ASTFOR:
+		return label != nil && hasbreak(n->n4, 0, label);
+	case ASTBLOCK:
+		for(i = 0; i < n->nl.n; i++)
+			if(hasbreak(n->nl.a[i], nullok, label))
+				return 1;
+		return 0;
+	case ASTBREAK:
+		if(n->sym == nil)
+			return nullok;
+		return n->sym == label;
+	case ASTSWITCH:
+		if(label == nil) return 0;
+		for(i = 0; i < n->nl.n; i++)
+			if(hasbreak(n->nl.a[i], 0, label))
+				return 1;
+		return 0;
+	case ASTTRY:
+		return hasbreak(n->n1, nullok, label) || hasbreak(n->n2, nullok, label) || hasbreak(n->n3, nullok, label);
+	default:
+		sysfatal("hasbreak: unimplemented %α", n->t);
+		return 0;
+	}
+
+}
+
+int
+returns(Node *n)
+{
+	int i, alive;
+
+	if(n == nil) return 0;
+	switch(n->t){
+	case ASTSYM: case ASTOP: case ASTASS: case ASTTERN:
+	case ASTFUNC: case ASTBREAK: case ASTCONTINUE:
+	case ASTDECL: case ASTDECLS: case ASTARRAY: case ASTOBJECT:
+	case ASTOBJELEM: case ASTUN: case ASTINDE: case ASTDOT:
+	case ASTCALL: case ASTPARAM: case ASTNUM: case ASTSTR:
+	case ASTTHIS: case ASTNEW: case ASTFORIN: case ASTCASE:
+	case ASTDEFAULT: case ASTIDX: case ASTCAST:
+		return 0;
+	case ASTRETURN: case ASTTHROW:
+		return 1;
+	case ASTIF:
+		return returns(n->n2) && returns(n->n3);
+	case ASTDOWHILE:
+		return returns(n->n2) && !hasbreak(n->n2, 1, nil);
+	case ASTWHILE:
+		return 0;
+	case ASTFOR:
+		return n->n2 == nil && !hasbreak(n->n4, 1, nil);
+	case ASTBLOCK:
+		for(i = 0; i < n->nl.n; i++)
+			if(returns(n->nl.a[i]))
+				return 1;
+		return 0;
+	case ASTLABEL:
+		return returns(n->n1) && !hasbreak(n->n1, 0, n->sym);
+	case ASTSWITCH:
+		alive = 1;
+		for(i = 0; i < n->nl.n; i++){
+			if(n->nl.a[i]->t == ASTCASE || n->nl.a[i]->t == ASTDEFAULT)
+				alive = 1;
+			else if(hasbreak(n->nl.a[i], 1, nil))
+				break;
+			else if(returns(n->nl.a[i]))
+				alive = 0;
+		}
+		return !alive;
+	case ASTTRY:
+		return returns(n->n1) || returns(n->n3);
+	default:
+		sysfatal("returns: unimplemented %α", n->t);
+		return 0;
+	}
+}
+
 void
 typecheck(Node *n, Node *func)
 {
@@ -2104,12 +2282,22 @@ typecheck(Node *n, Node *func)
 	case ASTFUNC:
 		for(i = 0; i < n->nl.n; i++)
 			typecheck(n->nl.a[i], n);
+		if(n->type->ret->t != TYPVOID && n->type->ret->t != TYPVAR){
+			for(i = 0; i < n->nl.n; i++)
+				if(returns(n->nl.a[i]))
+					break;
+			if(i == n->nl.n)
+				if(n->sym == nil)
+					error(n, "no return at end of anonymous function");
+				else
+					error(n, "no return at end of function '%s'", n->sym->name);
+		}
 		break;
 	case ASTOBJECT:
 		for(i = 0; i < n->nl.n; i++)
 			typecheck(n->nl.a[i]->n1, func);
-		if(n->sym != nil){
-			t = n->sym->type;
+		if(n->typearg != nil){
+			t = n->typearg;
 			for(i = 0; i < n->nl.n; i++){
 				s = getsym(&t->st, 0, n->nl.a[i]->str);
 				if(s->t == SYMNONE)
@@ -2157,6 +2345,7 @@ typecheck(Node *n, Node *func)
 			error(n, "illegal assignment of %τ to %τ", n->sym->def->type, n->sym->type);
 		break;
 	case ASTLABEL:
+		typecheck(n->n1, func);
 		break;
 	case ASTBREAK:
 		n->sym = fixsym(n->sym);
@@ -2430,7 +2619,8 @@ output(Fmt *f, Node *n, int ind, int ind0)
 		outblock(f, n->n3, ind, 0, 0);
 		break;
 	case ASTLABEL:
-		fmtprint(f, "%I%s:\n", ind0, n->sym->name);
+		fmtprint(f, "%I%s: ", ind0, n->sym->name);
+		output(f, n->n1, ind, 0);
 		break;
 	case ASTBREAK:
 		if(n->sym != nil)
