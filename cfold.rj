@@ -1,0 +1,199 @@
+int MAXCINT = 1<<31 - 1;
+int MINCINT = 1<<31;
+
+Node
+cintop(OpType op, Node a, Node b)
+{
+	int x, y, z;
+
+	if(a.t != ASTCINT || b.t != ASTCINT)
+		return null;
+	x = a.numi;
+	y = b.numi;
+	switch(op){
+	case OPADD: z = x + y; break;
+	case OPSUB: z = x - y; break;
+	case OPMUL: z = x * y; break;
+	case OPDIV: if(y == 0) return null; z = x / y; if(z < 0) z = Math.ceil(z); else z = Math.floor(z); break;
+	case OPMOD: z = x % y; break;
+	case OPEXP: if(y < 0) return null; z = x ** y; break;
+	case OPAND: z = x & y; break;
+	case OPOR: z = x | y; break;
+	case OPXOR:  z = x ^ y; break;
+	case OPXNOR: z = ~(x ^ y); break;
+	case OPLSL: case OPASL:
+		if(y >= 32 || y < 0 || x >> 32 - y != 0 || (x ^ x << y) < 0)
+			return null;
+		z = x << y;
+		break;
+	case OPASR:
+		if(a.type.sign){
+			if(y < 0)
+				return null;
+			if(y >= 32)
+				z = x >> 31;
+			else
+				z = x >> y;
+			break;
+		}
+		/* wet floor */
+	case OPLSR:
+		if(y < 0)
+			return null;
+		if(y >= 32)
+			z = 0;
+		else
+			z = x >>> y;
+		break;
+	case OPEQS: case OPEQ: z = (int)(x == y); break;
+	case OPNEQS: case OPNEQ: z = (int)(x != y); break;
+	case OPLAND: z = x && y; break;
+	case OPLOR: z = x || y; break;
+	case OPMAX: z = max(x, y); break;
+	default:
+		console.log("cintop: unimplemented " + (string)op);
+		return null;
+	}
+	if(isNaN(z) || z > MAXCINT || z < MINCINT)
+		return null;
+	return new Node(Node{t: ASTCINT, numi: z});
+}
+
+Node
+replace(Node from, Node to)
+{
+	to.lineno = from.lineno;
+	to.type = from.type;
+	to.isconst = from.isconst;
+	return to;
+}
+
+Node
+constfold0(Node n)
+{
+	Node n1, n2, m;
+
+	if(n == null)
+		return n;
+	switch(n.t){
+	case ASTCINT:
+		return n;
+	case ASTNUM:
+		if(n.type.t == TYPUNSZ && n.num.iscint())
+			return replace(n, new Node(Node{t: ASTCINT, numi: n.num.v.toInt()}));
+		return n;
+	case ASTSYM:
+		if(n.sym.t == SYMLPARAM)
+			return cfold(n.sym.def, n.sym.type);
+		return n;
+	case ASTBIN:
+		m = cintop(n.op, n.n1, n.n2);
+		if(m !== null)
+			return replace(n, m);
+		return n;
+	}
+	return n;
+}
+
+Node
+constfold(Node n)
+{
+	return treesub(n, constfold0);
+}
+
+Node
+arraysub(Node l[], Node f(Node))[]
+{
+	int i, j;
+	Node m, r[];
+	
+	for(i = 0; i < l.length; i++)
+		if(m = treesub(l[i], f), m !== l[i])
+			break;
+	if(i == l.length)
+		return l;
+	r = [];
+	for(j = 0; j < i; j++)
+		r.push(l[i]);
+	r.push(m);
+	for(j = i + 1; j < l.length; j++)
+		r.push(treesub(l[i], f));
+	return r;
+}
+
+Node
+treesub(Node n, Node f(Node))
+{
+	Node m, l[], pl[], n1, n2, n3, n4;
+	int i, j;
+
+	if(n == null)
+		return n;
+	switch(n.t){
+	case ASTCINT:
+	case ASTNUM:
+	case ASTSYM:
+		return f(n);
+	case ASTMODULE:
+		l = arraysub(n.l, f);
+		if(l === n.l)
+			return f(n);
+		return f(replace(n, new Node(Node{t: ASTMODULE, l: l, sym: n.sym})));
+	case ASTBLOCK:
+	case ASTCONCAT:
+		l = arraysub(n.l, f);
+		if(l === n.l)
+			return f(n);
+		return f(replace(n, new Node(Node{t: ASTMODULE, l: l})));
+	case ASTASSIGN:
+	case ASTBIN:
+	case ASTUN:
+	case ASTREPL:
+	case ASTINITIAL:
+	case ASTALWAYS:
+	case ASTASS:
+	case ASTDASS:
+	case ASTDELAY:
+	case ASTAT:
+	case ASTREPEAT:
+	case ASTPOSEDGE:
+	case ASTNEGEDGE:
+	case ASTTERN:
+	case ASTIDX:
+	case ASTIF:
+	case ASTWHILE:
+	case ASTFOR:
+	case ASTFOREVER:
+	case ASTMINSVAL:
+		n1 = treesub(n.n1, f);
+		n2 = treesub(n.n2, f);
+		n3 = treesub(n.n3, f);
+		n4 = treesub(n.n4, f);
+		if(n.n1 !== n1 || n.n2 !== n2 || n.n3 !== n3 || n.n4 !== n4)
+			return f(replace(n, new Node(Node{
+				t: n.t,
+				n1: n1, n2: n2, n3: n3, n4: n4,
+				op: n.op, sym: n.sym
+			})));
+		return f(n);
+	case ASTMINST:
+		l = arraysub(n.l, f);
+		pl = arraysub(n.pl, f);
+		if(l !== n.l || pl !== n.pl)
+			return f(replace(n, new Node(Node{t: n.t, l: l, pl: pl, sym: n.sym, symn: n.symn})));
+		return f(n);
+	case ASTCASE:
+	case ASTCASEX:
+	case ASTCASEZ:
+	case ASTCASIT:
+	default:
+		throw "treesub: unimplemented " + (string)n.t;
+	}
+}
+
+Node
+cfold(Node n, Type t)
+{
+	typecheck(n, t);
+	return constfold(n);
+}

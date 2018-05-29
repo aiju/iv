@@ -1,0 +1,218 @@
+struct Signal {
+	string name;
+	int width;
+	string val;
+	void watch[]();
+};
+
+void
+Signal(string name, int width)
+{
+	this.name = name;
+	this.width = width;
+	this.val = "x";
+	this.watch = [];
+}
+
+struct Event {
+	void run();
+	int time;
+};
+
+void
+Event(void run(void), int time)
+{
+	this.run = run;
+	this.time = time;
+}
+
+struct System {
+	Signal sig[string];
+	Event active[];
+	Event nonblock[];
+	Event inactive[];
+	Event future[];
+	int curtime;
+};
+
+void
+System(void)
+{
+	this.sig = {};
+	this.active = [];
+	this.nonblock = [];
+	this.inactive = [];
+	this.future = [];
+	this.curtime = 0;
+}
+
+void
+System.addsignal(string hier, Symbol s)
+{
+	Signal t;
+	
+	if(s.type.sz.t != ASTCINT)
+		throw "size is not a constant";
+	t = new Signal(hier + "." + s.name, s.type.sz.numi);
+	this.sig[t.name] = t;
+}
+
+Signal
+System.getsignal(string hier, Symbol s)
+{
+	return this.sig[hier + "." + s.name];
+}
+
+void
+System.assign(Signal s, string val)
+{
+	if(s.val != val && s.watch.length != 0){
+		this.active.push.apply(this.active, s.watch);
+		s.watch.length = 0;
+	}
+	s.val = val;
+	console.log((string)this.curtime + ": " + s.name + " = " + val);
+}
+
+void
+System.schedule(void fun(void), int time)
+{
+	int i;
+
+	if(time <= this.curtime){
+		this.inactive.push(new Event(fun, time));
+		return;
+	}
+	for(i = 0; i < this.future.length; i++)
+		if(this.future[i].time > i)
+			break;
+	this.future.splice(i, 0, new Event(fun, time));
+}
+
+string
+System.exprcompile(Node n, string hier)()
+{
+	System sys;
+	Signal sig;
+
+	sys = this;
+	switch(n.t){
+	case ASTSYM:
+		sig = this.getsignal(hier, n.sym);
+		return string(void) return sig.val;
+	case ASTCINT:
+		return string(void) return (string)n.numi;
+	default:
+		throw "exprcompile: unimplemented " + (string)n.t;
+	}
+}
+
+void
+System.statcompile(Node n, string hier)(void next())()
+{
+	System sys;
+	Signal sig, wsig;
+	int delay, i;
+	string rhs(void);
+	var f;
+	void rc(void next())(), stat(void next())();
+
+	sys = this;
+	switch(n.t){
+	case ASTDELAY:
+		if(n.n1.t != ASTCINT)
+			error(n.lineno, "delay not a constant");
+		delay = n.n1.numi;
+		return void(void next())() return void() return sys.schedule(next, sys.curtime + delay);
+	case ASTAT:
+		if(n.l.length != 1 || n.l[0].t != ASTSYM)
+			error(n.lineno, "unsupported @ construct");
+		wsig = this.getsignal(hier, n.l[0].sym);
+		return void(void next())() return void() return wsig.watch.push(new Event(next, sys.curtime));
+	case ASTASS:
+		if(n.n1.t != ASTSYM)
+			error(n.lineno, "lval not a signal");
+		sig = this.getsignal(hier, n.n1.sym);
+		rhs = this.exprcompile(n.n2, hier);
+		return void(void next())() return void(){
+			sys.assign(sig, rhs());
+			next();
+		};
+	case ASTBLOCK:
+		rc = void(void next())() return next;
+		for(i = 0; i < n.l.length; i++){
+			stat = this.statcompile(n.l[i], hier);
+			rc = (void(void first(void next())(), void second(void next())())(void next())() return void(void next())() return first(second(next)))(rc, stat);
+		}
+		return rc;
+	default:
+		throw "statcompile: unimplemented " + (string)n.t;
+	}
+}
+
+void
+System.compile(Node n, string hier)
+{
+	int i;
+	string s;
+	void stat(void next())();
+	void fun();
+
+	if(n == null) return;
+	switch(n.t){
+	case ASTMODULE:
+		for(s in n.sym.st.tab)
+			switch(n.sym.st.tab[s].t){
+			case SYMWIRE:
+			case SYMREG:
+			case SYMPORT:
+				this.addsignal(hier, n.sym.st.tab[s]);
+				break;
+			}
+		for(i = 0; i < n.l.length; i++)
+			this.compile(n.l[i], hier);
+		break;
+	case ASTMINST:
+		this.compile(n.sym.def, hier + "." + n.symn.name);
+		break;
+	case ASTINITIAL:
+		this.schedule(this.statcompile(n.n1, hier)(void(){}), 0);
+		break;
+	case ASTALWAYS:
+		stat = this.statcompile(n.n1, hier);
+		fun = void(void) return stat(fun)();
+		this.schedule(fun, 0);
+		break;
+	default:
+		throw "compile: unimplemented " + (string)n.t;
+	}
+}
+
+void
+System.run(void)
+{
+	int i, j, t;
+	Event el[];
+	
+	for(i = 0; i < 1000; i++){
+		if(this.active.length == 0){
+			if(this.inactive.length != 0){
+				this.active.push.apply(this.active, this.inactive);
+				this.inactive.length = 0;
+			}else if(this.nonblock.length != 0){
+				this.active.push.apply(this.active, this.nonblock);
+				this.nonblock.length = 0;
+			}else if(this.future.length != 0){
+				t = this.future[0].time;
+				for(j = 1; j < this.future.length; j++)
+					if(this.future[j].time > t)
+						break;
+				el = this.future.splice(0, j);
+				this.active.push.apply(this.active, el);
+				this.curtime = t;
+			}else
+				break;
+		}
+		this.active.shift().run();
+	}
+}
