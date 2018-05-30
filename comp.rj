@@ -1,8 +1,10 @@
+struct Process;
+
 struct Signal {
 	string name;
 	int width;
 	string val;
-	void watch[]();
+	Process watch[];
 };
 
 void
@@ -24,6 +26,30 @@ Event(void run(void), int time)
 {
 	this.run = run;
 	this.time = time;
+}
+
+struct Process {
+	enum {
+		PACTIVE,
+		PSLEEP,
+		PDEAD
+	} state;
+	System sys;
+	string hier;
+	void code[]();
+	string stack[];
+	int pc;
+};
+
+void
+Process(System sys, string hier)
+{
+	this.sys = sys;
+	this.hier = hier;
+	this.code = [];
+	this.stack = [];
+	this.pc = 0;
+	this.state = PACTIVE;
 }
 
 struct System {
@@ -66,8 +92,12 @@ System.getsignal(string hier, Symbol s)
 void
 System.assign(Signal s, string val)
 {
+	int i;
+
 	if(s.val != val && s.watch.length != 0){
-		this.active.push.apply(this.active, s.watch);
+		for(i = 0; i < s.watch.length; i++)
+			this.active.push(new Event(
+				(void(Process p)() return void() return p.run())(s.watch[i]), 0));
 		s.watch.length = 0;
 	}
 	s.val = val;
@@ -89,64 +119,108 @@ System.schedule(void fun(void), int time)
 	this.future.splice(i, 0, new Event(fun, time));
 }
 
-string
-System.exprcompile(Node n, string hier)()
+void
+Process.exprcompile(Node n)
 {
-	System sys;
-	Signal sig;
-
-	sys = this;
+	Process thisp;
+	string v;
+	Signal s;
+	
+	thisp = this;
 	switch(n.t){
 	case ASTSYM:
-		sig = this.getsignal(hier, n.sym);
-		return string(void) return sig.val;
+		s = this.sys.getsignal(this.hier, n.sym);
+		this.code.push(void() return thisp.push(s.val));
+		break;
 	case ASTCINT:
-		return string(void) return (string)n.numi;
+		v = decconv(0, (string)n.numi).s;
+		this.code.push(void() return thisp.push(v));
+		break;
 	default:
-		throw "exprcompile: unimplemented " + (string)n.t;
+		throw "Process.statcompile: unimplemented " + (string)n.t;
 	}
 }
 
 void
-System.statcompile(Node n, string hier)(void next())()
+Process.statcompile(Node n)
 {
-	System sys;
-	Signal sig, wsig;
-	int delay, i;
-	string rhs(void);
-	var f;
-	void rc(void next())(), stat(void next())();
+	int i, delay;
+	Process thisp, extrap;
+	Signal s;
 
-	sys = this;
+	thisp = this;
 	switch(n.t){
+	case ASTBLOCK:
+		for(i = 0; i < n.l.length; i++)
+			this.statcompile(n.l[i]);
+		break;
 	case ASTDELAY:
-		if(n.n1.t != ASTCINT)
-			error(n.lineno, "delay not a constant");
-		delay = n.n1.numi;
-		return void(void next())() return void() return sys.schedule(next, sys.curtime + delay);
+                if(n.n1.t != ASTCINT)
+                        error(n.lineno, "delay not a constant");
+                delay = n.n1.numi;
+		this.code.push(void(){
+			thisp.sys.schedule(void() return thisp.run(), thisp.sys.curtime + delay);
+			thisp.state = PSLEEP;
+		});
+		break;
 	case ASTAT:
 		if(n.l.length != 1 || n.l[0].t != ASTSYM)
-			error(n.lineno, "unsupported @ construct");
-		wsig = this.getsignal(hier, n.l[0].sym);
-		return void(void next())() return void() return wsig.watch.push(new Event(next, sys.curtime));
+			error(n.lineno, "unsupported ASTAT");
+		s = this.sys.getsignal(this.hier, n.l[0].sym);
+		this.code.push(void(){
+			s.watch.push(thisp);
+			thisp.state = PSLEEP;
+		});
+		break;
 	case ASTASS:
 		if(n.n1.t != ASTSYM)
-			error(n.lineno, "lval not a signal");
-		sig = this.getsignal(hier, n.n1.sym);
-		rhs = this.exprcompile(n.n2, hier);
-		return void(void next())() return void(){
-			sys.assign(sig, rhs());
-			next();
-		};
-	case ASTBLOCK:
-		rc = void(void next())() return next;
-		for(i = 0; i < n.l.length; i++){
-			stat = this.statcompile(n.l[i], hier);
-			rc = (void(void first(void next())(), void second(void next())())(void next())() return void(void next())() return first(second(next)))(rc, stat);
-		}
-		return rc;
+			error(n.lineno, "invalid lval");
+		s = this.sys.getsignal(this.hier, n.n1.sym);
+		this.exprcompile(n.n2);
+		if(n.n3 !== null)
+			this.statcompile(n.n3);
+		this.code.push(void() return thisp.sys.assign(s, thisp.pop()));
+		break;
+	case ASTDASS:
+		if(n.n1.t != ASTSYM)
+			error(n.lineno, "invalid lval");
+		s = this.sys.getsignal(this.hier, n.n1.sym);
+		this.exprcompile(n.n2);
+		this.code.push(void(){
+			string v;
+			v = thisp.pop();
+			thisp.sys.nonblock.push(new Event(void() return thisp.sys.assign(s, v), 0));
+		});
+		break;
 	default:
-		throw "statcompile: unimplemented " + (string)n.t;
+		throw "Process.statcompile: unimplemented " + (string)n.t;
+	}
+}
+
+void
+Process.push(string s)
+{
+	this.stack.push(s);
+}
+
+string
+Process.pop()
+{
+	if(this.stack.length == 0)
+		throw "stack underflow";
+	return this.stack.pop();
+}
+
+void
+Process.run()
+{
+	void f();
+
+	if(this.state == PSLEEP)
+		this.state = PACTIVE;
+	while(this.state == PACTIVE){
+		f = this.code[this.pc++];
+		f();
 	}
 }
 
@@ -155,8 +229,7 @@ System.compile(Node n, string hier)
 {
 	int i;
 	string s;
-	void stat(void next())();
-	void fun();
+	Process p;
 
 	if(n == null) return;
 	switch(n.t){
@@ -176,15 +249,19 @@ System.compile(Node n, string hier)
 		this.compile(n.sym.def, hier + "." + n.symn.name);
 		break;
 	case ASTINITIAL:
-		this.schedule(this.statcompile(n.n1, hier)(void(){}), 0);
+		p = new Process(this, hier);
+		p.statcompile(n.n1);
+		p.code.push(function() { p.state = PDEAD; });
+		this.schedule(void() return p.run(), 0);
 		break;
 	case ASTALWAYS:
-		stat = this.statcompile(n.n1, hier);
-		fun = void(void) return stat(fun)();
-		this.schedule(fun, 0);
+		p = new Process(this, hier);
+		p.statcompile(n.n1);
+		p.code.push(function() { p.pc = 0; });
+		this.schedule(void() return p.run(), 0);
 		break;
 	default:
-		throw "compile: unimplemented " + (string)n.t;
+		throw "System.compile: unimplemented " + (string)n.t;
 	}
 }
 
