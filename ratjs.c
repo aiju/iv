@@ -609,7 +609,7 @@ decl(SymTab *st, int t, Symbol *s, Type *type, Node *def)
 	if(s == nil) return nil;
 	s = getsym(st, 0, s->name);
 	if(s->t != SYMNONE)
-		error(nil, "'%s' redeclared", s->name);
+		error(nil, "'%s' redeclared as %σ", s->name, t);
 	s->t = t;
 	s->type = type;
 	s->Line = curline;
@@ -1138,7 +1138,7 @@ expectany(int x, ...)
 }
 
 
-Oper ternop1 = {.prec 4}, ternop2 = {.prec 3, .rassoc -3};
+Oper ternop1 = {.prec = 4}, ternop2 = {.prec = 3, .rassoc = -3};
 Oper *
 opfind(int t)
 {
@@ -1720,8 +1720,9 @@ p_stat(void)
 		return nil;
 	case TSYM:
 		if(lexnextch == ':'){
+			sym = lexsym;
 			lex();
-			return node(nil, ASTLABEL, decl(scope, SYMLABEL, lexsym, nil, nil), p_stat());
+			return node(nil, ASTLABEL, decl(scope, SYMLABEL, sym, nil, nil), p_stat());
 		}
 	case '+': case '-': case '~': case '!': case TPP: case TMM: case '(': case TTHIS:
 	case TNUM: case TSTRLIT:
@@ -2694,7 +2695,7 @@ main(int argc, char **argv)
 	int i;
 	Fmt f;
 	static char buf[8192];
-	NodeList prog;
+	static NodeList prog;
 	
 	booltype.t = TYPBOOL; booltype.st.last = &booltype.st.list;
 	stringtype.t = TYPSTRING; stringtype.st.last = &stringtype.st.list;
