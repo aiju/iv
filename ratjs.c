@@ -563,43 +563,62 @@ typefmt(Fmt *f)
 {
 	Type *t;
 	int i;
+	int w;
 	
 	t = va_arg(f->args, Type *);
+	w = f->width;
 	if(t == nil){
 		fmtprint(f, "<nil>");
 		return 0;
 	}
-	if(t->label != nil)
-		return fmtprint(f, "%s", t->label);
+	if(t->label != nil){
+		if((w & 1) == 0) fmtprint(f, "%s", t->label);
+		return 0;
+	}
 	switch(t->t){
 	case TYPVAR:
-		return fmtprint(f, "var");
+		if((w & 1) == 0) fmtprint(f, "var");
+		return 0;
 	case TYPINT:
-		return fmtprint(f, "int");
+		if((w & 1) == 0) fmtprint(f, "int");
+		return 0;
 	case TYPSTRING:
-		return fmtprint(f, "string");
+		if((w & 1) == 0) fmtprint(f, "string");
+		return 0;
 	case TYPBOOL:
-		return fmtprint(f, "bool");
+		if((w & 1) == 0) fmtprint(f, "bool");
+		return 0;
 	case TYPVOID:
-		return fmtprint(f, "void");
+		if((w & 1) == 0) fmtprint(f, "void");
+		return 0;
 	case TYPSTRUCT:
-		return fmtprint(f, "struct {...}");
+		if((w & 1) == 0) fmtprint(f, "struct {...}");
+		return 0;
 	case TYPFUNC:
-		fmtprint(f, "%τ(*)(", t->ret);
-		for(i = 0; i < t->pl.n; i++){
-			assert(t->pl.a[i]->t == ASTPARAM);
-			fmtprint(f, "%s%τ", i>0?",":"", t->pl.a[i]->type);
+		if((w & 1) == 0) fmtprint(f, "%2τ", t->ret);
+		if((w & 2) == 0){
+			fmtrune(f, '(');
+			for(i = 0; i < t->pl.n; i++){
+				assert(t->pl.a[i]->t == ASTPARAM);
+				fmtprint(f, "%s%τ", i>0?",":"", t->pl.a[i]->type);
+			}
+			fmtprint(f, ")%1τ", t->ret);
 		}
-		return fmtprint(f, ")");
+		return 0;
 	case TYPARRAY:
-		return fmtprint(f, "%τ[]", t->ret);
+		if((w & 1) == 0) fmtprint(f, "%2τ", t->ret);
+		if((w & 2) == 0) fmtprint(f, "[]%1τ", t->ret);
+		return 0;
 	case TYPMAP:
-		return fmtprint(f, "%τ[%τ]", t->ret, t->idx);
+		if((w & 1) == 0) fmtprint(f, "%2τ", t->ret);
+		if((w & 2) == 0) fmtprint(f, "[%τ]%1τ", t->idx, t->ret);
+		return 0;
 	case TYPENUM:
-		enumprint(f, t);
+		if((w & 1) == 0) enumprint(f, t);
 		return 0;
 	default:
-		return fmtprint(f, "??? (%d)", t->t);
+		if((w & 1) == 0) fmtprint(f, "??? (%d)", t->t);
+		return 0;
 	}
 }
 

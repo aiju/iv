@@ -110,15 +110,127 @@ mpmul(Bits a, Bits b)
 }
 
 Bits
-Bits.trunc(int n)
+mpand(Bits a, Bits b)
 {
-	return new Bits(this.s.substr(0, n) + "0");
+	int i, m;
+	string r;
+	
+	m = max(a.s.length, b.s.length);
+	r = "";
+	for(i = 0; i < m; i++){
+		if(a.dig(i) == "0" || b.dig(i) == "0")
+			r += "0";
+		else if((a.s[i]+b.s[i]).match("[xz]") != null)
+			r += "x";
+		else
+			r += "1";
+	}
+	return new Bits(r);
 }
 
 Bits
-Bits.xtend(int n)
+mpor(Bits a, Bits b)
 {
-	return new Bits(this.s.substr(0, n));
+	int i, m;
+	string r;
+	
+	m = max(a.s.length, b.s.length);
+	r = "";
+	for(i = 0; i < m; i++){
+		if(a.dig(i) == "1" || b.dig(i) == "1")
+			r += "1";
+		else if((a.s[i]+b.s[i]).match("[xz]") != null)
+			r += "x";
+		else
+			r += "0";
+	}
+	return new Bits(r);
+}
+
+Bits
+mpxor(Bits a, Bits b)
+{
+	int i, m;
+	string r;
+	
+	m = max(a.s.length, b.s.length);
+	r = "";
+	for(i = 0; i < m; i++){
+		if((a.s[i]+b.s[i]).match("[xz]") != null)
+			r += "x";
+		else if((bool)((int)(a.dig(i) == "1") ^ (int)(b.dig(i) == "1")))
+			r += "1";
+		else
+			r += "0";
+	}
+	return new Bits(r);
+}
+
+Bits
+mpxnor(Bits a, Bits b)
+{
+	int i, m;
+	string r;
+	
+	m = max(a.s.length, b.s.length);
+	r = "";
+	for(i = 0; i < m; i++){
+		if((a.s[i]+b.s[i]).match("[xz]") != null)
+			r += "x";
+		else if((bool)((int)(a.dig(i) == "1") ^ (int)(b.dig(i) == "1")))
+			r += "0";
+		else
+			r += "1";
+	}
+	return new Bits(r);
+}
+
+int
+mpcmp(Bits a, Bits b)
+{
+	int i, m;
+	
+	if(a.gotXZ() || b.gotXZ())
+		return 3 + (int)(a.s == b.s);
+	m = max(a.s.length, b.s.length);
+	if(a.dig(m-1) == "1" && b.dig(m-1) == "0") return 0;
+	if(a.dig(m-1) == "0" && b.dig(m-1) == "1") return 2;
+	for(i = m-1; i >= 0; i--){
+		if(a.dig(i) == "0" && b.dig(i) == "1") return 0;
+		if(a.dig(i) == "1" && b.dig(i) == "0") return 2;
+	}
+	return 1;
+}
+
+Bits
+mplsl(Bits a, Bits b)
+{
+	int n;
+
+	if(b.s[b.s.length - 1] == "1" || b.gotXZ()) return new Bits("x");
+	n = b.toInt();
+	return new Bits("0".repeat(n) + a.s);
+}
+
+Bits
+mplsr(Bits a, Bits b)
+{
+	int n;
+
+	if(b.s[b.s.length - 1] == "1" || b.gotXZ()) return new Bits("x");
+	n = b.toInt();
+	return new Bits(a.s.substr(n) + a.s[a.s.length - 1]);
+}
+
+Bits
+Bits.trunc(int n, bool sign)
+{
+	if(sign)
+		return new Bits(this.s.substr(0, n));
+	else if(n > this.s.length)
+		return new Bits(this.s + this.s[this.s.length - 1].repeat(n - this.s.length) + "0");
+	else
+		return new Bits(this.s.substr(0, n) + "0");
 }
 
 int
@@ -131,3 +243,136 @@ Bits.toInt()
 		r = r * 2 + parseInt(this.s.charAt(i));
 	return r;
 }
+
+bool
+Bits.toBool()
+{
+	return !this.gotXZ() && this.s != "0";
+}
+
+Bits unop[string](Bits a) = {
+	OPLNOT: Bits(Bits a){
+		if(a.gotXZ()) return new Bits("x");
+		else if(a.s == "0") return new Bits("10");
+		else return new Bits("");
+	},
+	OPUPLUS: Bits(Bits a) return a,
+	OPUMINUS: Bits(Bits a){
+		string r, c;
+		int i;
+		
+		c = "1";
+		r = "";
+		for(i = 0; i < a.s.length + 1; i++)
+			switch(a.dig(i) + c){
+			case "00": case "11": r += "1"; c = "0"; break;
+			case "10": r += "0"; c = "0"; break;
+			case "01": r += "0"; c = "1"; break;
+			default:
+				return new Bits("x");
+			}
+		return new Bits(r);
+	},
+	OPCOM: Bits(Bits a){
+		string r;
+		int i;
+		
+		r = "";
+		for(i = 0; i < a.s.length; i++)
+			switch(a.s[i]){
+			case "0": r += "1"; break;
+			case "1": r += "0"; break;
+			case "x": r += "x"; break;
+			}
+		return new Bits(r);
+	},
+	OPROR: Bits(Bits a){
+		if(a.s.indexOf("1") >= 0) return new Bits("10");
+		else if(a.s == "0") return new Bits("");
+		else return new Bits("x");
+	},
+	OPRNOR: Bits(Bits a){
+		if(a.s.indexOf("1") >= 0) return new Bits("0");
+		else if(a.s == "0") return new Bits("10");
+		else return new Bits("x");
+	},
+	OPRAND: Bits(Bits a){
+		if(a.s.indexOf("0") >= 0) return new Bits("10");
+		else if(a.gotXZ()) return new Bits("x");
+		else return new Bits("");
+	},
+	OPRNAND: Bits(Bits a){
+		if(a.s.indexOf("0") >= 0) return new Bits("0");
+		else if(a.gotXZ()) return new Bits("x");
+		else return new Bits("10");
+	},
+	OPRXOR: Bits(Bits a){
+		int i, n;
+		
+		n = 0;
+		for(i = 0; i < a.s.length; i++)
+			switch(a.s[i]){
+			case "0": break;
+			case "1": n++; break;
+			default: return new Bits("x");
+			}
+		if((n & 1) != 0)
+			return new Bits("10");
+		return new Bits("0");
+	},
+	OPRXNOR: Bits(Bits a){
+		int i, n;
+		
+		n = 0;
+		for(i = 0; i < a.s.length; i++)
+			switch(a.s[i]){
+			case "0": break;
+			case "1": n++; break;
+			default: return new Bits("x");
+			}
+		if((n & 1) != 0)
+			return new Bits("0");
+		return new Bits("1");
+	},
+};
+
+Bits binop[string](Bits, Bits) = {
+	OPADD: mpadd,
+	OPSUB: mpsub,
+	OPMUL: mpmul,
+	OPAND: mpand,
+	OPOR: mpor,
+	OPXOR: mpxor,
+	OPXNOR: mpxnor,
+	OPLT: Bits(Bits a, Bits b) return new Bits("100xx"[mpcmp(a, b)] + "0"),
+	OPLE: Bits(Bits a, Bits b) return new Bits("110xx"[mpcmp(a, b)] + "0"),
+	OPGT: Bits(Bits a, Bits b) return new Bits("001xx"[mpcmp(a, b)] + "0"),
+	OPGE: Bits(Bits a, Bits b) return new Bits("011xx"[mpcmp(a, b)] + "0"),
+	OPEQ: Bits(Bits a, Bits b) return new Bits("010xx"[mpcmp(a, b)] + "0"),
+	OPNEQ: Bits(Bits a, Bits b) return new Bits("101xx"[mpcmp(a, b)] + "0"),
+	OPEQS: Bits(Bits a, Bits b) return new Bits("01001"[mpcmp(a, b)] + "0"),
+	OPNEQS: Bits(Bits a, Bits b) return new Bits("10110"[mpcmp(a, b)] + "0"),
+	OPLOR: Bits(Bits a, Bits b){
+		if(a.gotXZ() || b.gotXZ()) return new Bits("x0");
+		else if(a.s == "0" && b.s == "0") return new Bits("");
+		else return new Bits("10");
+	},
+	OPLAND: Bits(Bits a, Bits b){
+		if(a.gotXZ() || b.gotXZ()) return new Bits("x0");
+		else if(a.s == "1" && b.s == "1") return new Bits("10");
+		else return new Bits("");
+	},
+	OPASL: mplsl,
+	OPLSL: mplsl,
+	OPASR: mplsr,
+	OPLSR: mplsr,
+	
+	
+};
+
+/*
+		OPDIV,
+		OPEXP,
+		OPMAX,
+		OPMOD,
+*/

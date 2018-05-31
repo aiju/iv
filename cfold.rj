@@ -114,10 +114,10 @@ arraysub(Node l[], Node f(Node))[]
 		return l;
 	r = [];
 	for(j = 0; j < i; j++)
-		r.push(l[i]);
+		r.push(l[j]);
 	r.push(m);
 	for(j = i + 1; j < l.length; j++)
-		r.push(treesub(l[i], f));
+		r.push(treesub(l[j], f));
 	return r;
 }
 
@@ -138,13 +138,14 @@ treesub(Node n, Node f(Node))
 		l = arraysub(n.l, f);
 		if(l === n.l)
 			return f(n);
-		return f(replace(n, new Node(Node{t: ASTMODULE, l: l, sym: n.sym})));
+		return f(replace(n, new Node(Node{t: n.t, l: l, sym: n.sym})));
 	case ASTBLOCK:
 	case ASTCONCAT:
+	case ASTAT:
 		l = arraysub(n.l, f);
 		if(l === n.l)
 			return f(n);
-		return f(replace(n, new Node(Node{t: ASTMODULE, l: l})));
+		return f(replace(n, new Node(Node{t: n.t, l: l})));
 	case ASTASSIGN:
 	case ASTBIN:
 	case ASTUN:
@@ -154,7 +155,6 @@ treesub(Node n, Node f(Node))
 	case ASTASS:
 	case ASTDASS:
 	case ASTDELAY:
-	case ASTAT:
 	case ASTREPEAT:
 	case ASTPOSEDGE:
 	case ASTNEGEDGE:

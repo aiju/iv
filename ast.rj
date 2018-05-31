@@ -321,6 +321,11 @@ typecheck(Node n, Type ctxt)
 		typecheck(n.n1, null);
 		intcheck(n.n1, true, " in delay");
 		break;
+	case ASTPOSEDGE:
+	case ASTNEGEDGE:
+		typecheck(n.n1, null);
+		n.type = eventtype;
+		break;
 	case ASTAT:
 		if(n.l !== null){
 			for(i = 0; i < n.l.length; i++){

@@ -218,10 +218,7 @@ numparse(int lno, Token a, Token b, Token c)
 	rr = new Bits(r);
 	if(a !== null){
 		p = parseInt(a.str, 10);
-		if(b.sign)
-			rr = rr.xtend(p);
-		else
-			rr = rr.trunc(p);
+		rr = rr.trunc(p, b.sign);
 	}else
 		p = -1;
 	return new Const(rr, p, b.sign);
@@ -780,7 +777,7 @@ Parser.p_event_expr()[]
 	do{
 		if(this.got("kw:posedge") !== null)
 			n = new Node(Node{t: ASTPOSEDGE, n1: this.p_expr(), lineno: this.lineno});
-		else if(this.got("kw.negedge") !== null)
+		else if(this.got("kw:negedge") !== null)
 			n = new Node(Node{t: ASTNEGEDGE, n1: this.p_expr(), lineno: this.lineno});
 		else
 			n = this.p_expr();
@@ -833,6 +830,10 @@ Parser.p_stat_assign()
 	}
 	r = this.p_expr();
 	this.expect(";");
+	if(d !== null && d.t == ASTAT && d.l === null){
+		d.l = [];
+		nodedeps(r, d.l);
+	}
 	return new Node(Node{t: nonblock ? ASTDASS : ASTASS, n1: l, n2: r, n3: d, lineno: lineno});
 }
 
@@ -946,6 +947,10 @@ Parser.p_stat()[]
 	case "@": case "@*": 
 		a = this.p_event_control();
 		l = this.p_stat();
+		if(a.l === null){
+			a.l = [];
+			l.forEach(void(e) return nodedeps(e, a.l));
+		}
 		l.unshift(a);
 		return l;
 	case "#":
@@ -1210,7 +1215,7 @@ parse()
 		
 		sys = new System();
 		sys.compile(m[0], m[0].sym.name);
-		sys.run();
+		document.getElementById("out").innerHTML = sys.run();
 	}catch(e){
 		document.getElementById("out").innerHTML += e;
 	}

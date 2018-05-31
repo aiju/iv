@@ -1,31 +1,49 @@
-struct Process;
+struct Watch;
+struct Event;
 
 struct Signal {
 	string name;
 	int width;
-	string val;
-	Process watch[];
+	bool sign;
+	Bits val;
+	Watch watch[];
 };
 
 void
-Signal(string name, int width)
+Signal(string name, int width, bool sign)
 {
 	this.name = name;
 	this.width = width;
-	this.val = "x";
+	this.sign = sign;
+	this.val = new Bits("x");
 	this.watch = [];
 }
 
+struct Watch {
+	Signal sig;
+	enum {
+		WEDGE,
+		WPOSEDGE,
+		WNEGEDGE
+	} edge;
+	Event e;
+};
+
 struct Event {
 	void run();
-	int time;
+	int time, delay;
+	bool blocking;
+	Watch w[];
 };
 
 void
-Event(void run(void), int time)
+Event(void run(void), bool blocking)
 {
 	this.run = run;
-	this.time = time;
+	this.time = 0;
+	this.w = [];
+	this.blocking = blocking;
+	this.delay = 0;
 }
 
 struct Process {
@@ -37,7 +55,7 @@ struct Process {
 	System sys;
 	string hier;
 	void code[]();
-	string stack[];
+	Bits stack[];
 	int pc;
 };
 
@@ -59,6 +77,7 @@ struct System {
 	Event inactive[];
 	Event future[];
 	int curtime;
+	string msg;
 };
 
 void
@@ -70,6 +89,7 @@ System(void)
 	this.inactive = [];
 	this.future = [];
 	this.curtime = 0;
+	this.msg = "";
 }
 
 void
@@ -79,7 +99,15 @@ System.addsignal(string hier, Symbol s)
 	
 	if(s.type.sz.t != ASTCINT)
 		throw "size is not a constant";
-	t = new Signal(hier + "." + s.name, s.type.sz.numi);
+	t = new Signal(hier + "." + s.name, s.type.sz.numi, s.type.sign);
+	if(s.def !== null){
+		switch(s.def.t){
+		case ASTCINT: t.val = decconv(0, (string)s.def.numi); break;
+		case ASTNUM: t.val = s.def.num.v; break;
+		default:
+			throw "default not a constant";
+		}
+	}
 	this.sig[t.name] = t;
 }
 
@@ -90,41 +118,77 @@ System.getsignal(string hier, Symbol s)
 }
 
 void
-System.assign(Signal s, string val)
+System.assign(Signal s, Bits val)
 {
-	int i;
+	int i, j, k;
+	int x, y;
+	Bits oval;
+	Watch w;
+	Event f[];
 
-	if(s.val != val && s.watch.length != 0){
-		for(i = 0; i < s.watch.length; i++)
-			this.active.push(new Event(
-				(void(Process p)() return void() return p.run())(s.watch[i]), 0));
-		s.watch.length = 0;
-	}
+	val = val.trunc(s.width, s.sign);
+	oval = s.val;
 	s.val = val;
-	console.log((string)this.curtime + ": " + s.name + " = " + val);
+	this.msg += (string)this.curtime + ": " + s.name + " = " + (val.gotXZ()?val.s:(string)val.toInt()) + "\n";
+	if(oval.s != val.s && s.watch.length != 0){
+		x = "0xz1".indexOf(oval.s[0]) + 1 >> 1;
+		y = "0xz1".indexOf(val.s[0]) + 1 >> 1;
+		loop: for(i = 0; i < s.watch.length; i++){
+			w = s.watch[i];
+			switch(w.edge){
+			case WEDGE:
+				break;
+			case WPOSEDGE:
+				if(x > y) continue loop;
+				break;
+			case WNEGEDGE:
+				if(x < y) continue loop;
+				break;
+			}
+			for(j = 0; j < w.e.w.length; j++){
+				k = w.e.w[j].sig.watch.indexOf(w);
+				w.e.w[j].sig.watch.splice(k, 1);
+			}
+			this.active.push(w.e);
+		}
+	}
 }
 
 void
-System.schedule(void fun(void), int time)
+System.schedule(Event e)
 {
 	int i;
 
-	if(time <= this.curtime){
-		this.inactive.push(new Event(fun, time));
+	if(e === null) return;
+	e.time = this.curtime + e.delay;
+	if(e.w.length != 0){
+		for(i = 0; i < e.w.length; i++)
+			e.w[i].sig.watch.push(e.w[i]);
+		return;
+	}
+	if(e.time <= this.curtime){
+		if(e.blocking)
+			this.inactive.push(e);
+		else
+			this.nonblock.push(e);
 		return;
 	}
 	for(i = 0; i < this.future.length; i++)
-		if(this.future[i].time > i)
+		if(this.future[i].time > e.time || e.blocking && this.future[i].time == e.time && !this.future[i].blocking)
 			break;
-	this.future.splice(i, 0, new Event(fun, time));
+	this.future.splice(i, 0, e);
 }
 
 void
 Process.exprcompile(Node n)
 {
 	Process thisp;
-	string v;
+	Bits v;
 	Signal s;
+	Bits fun1(Bits);
+	Bits fun2(Bits, Bits);
+	int s1, s2, so;
+	bool sign;
 	
 	thisp = this;
 	switch(n.t){
@@ -132,46 +196,157 @@ Process.exprcompile(Node n)
 		s = this.sys.getsignal(this.hier, n.sym);
 		this.code.push(void() return thisp.push(s.val));
 		break;
+	case ASTUN:
+		this.exprcompile(n.n1);
+		fun1 = unop[n.op];
+		if(fun1 == undefined) throw "Process.exprcompile: unimlemented " + (string)n.op;
+		if(n.type.t == TYPUNSZ){
+			this.code.push(void() return thisp.push(fun1(thisp.pop())));
+		}else{
+			if(n.n1.type.sz.t != ASTCINT || n.type.sz.t != ASTCINT)
+				throw "Process.exprcompile: type size is not a constant";
+			s1 = n.n1.type.sz.numi;
+			so = n.type.sz.numi;
+			this.code.push(void() return thisp.push(fun1(thisp.pop().trunc(s1, sign)).trunc(so, sign)));
+		}
+		break;
+	case ASTBIN:
+		this.exprcompile(n.n1);
+		this.exprcompile(n.n2);
+		fun2 = binop[n.op];
+		if(fun2 == undefined) throw "Process.exprcompile: unimlemented " + (string)n.op;
+		sign = n.type.sign;
+		if(n.type.t == TYPUNSZ || n.n1.type.t == TYPUNSZ || n.n2.type.t == TYPUNSZ){
+			this.code.push(void(){
+				Bits a, b;
+				
+				b = thisp.pop();
+				a = thisp.pop();
+				thisp.push(fun2(a, b));
+			});
+		}else{
+			if(n.n1.type.sz.t != ASTCINT || n.n2.type.sz.t != ASTCINT || n.type.sz.t != ASTCINT)
+				throw "Process.exprcompile: type size is not a constant";
+			s1 = n.n1.type.sz.numi;
+			s2 = n.n2.type.sz.numi;
+			so = n.type.sz.numi;
+			this.code.push(void(){
+				Bits a, b;
+				
+				b = thisp.pop().trunc(s1, sign);
+				a = thisp.pop().trunc(s2, sign);
+				thisp.push(fun2(a, b).trunc(so, sign));
+			});
+		}
+		break;
 	case ASTCINT:
-		v = decconv(0, (string)n.numi).s;
+		v = decconv(0, (string)n.numi);
+		this.code.push(void() return thisp.push(v));
+		break;
+	case ASTNUM:
+		v = n.num.v;
 		this.code.push(void() return thisp.push(v));
 		break;
 	default:
-		throw "Process.statcompile: unimplemented " + (string)n.t;
+		throw "Process.exprcompile: unimplemented " + (string)n.t;
+	}
+}
+
+Event
+Process.delaycompile(Node n, void run(), bool blocking)
+{
+	Event e;
+	Node m;
+	int delay;
+	int i;
+	Watch w;
+	
+	e = new Event(run, blocking);
+	if(n === null)
+		return e;
+	switch(n.t){
+	case ASTDELAY:
+		if(n.n1.t != ASTCINT)
+			error(n.lineno, "delay not a constant");
+		e.delay = n.n1.numi;
+		break;
+	case ASTAT:
+		if(n.l.length == 0)
+			return null;
+		for(i = 0; i < n.l.length; i++){
+			w = Watch{edge: WEDGE, e: e};
+			if(n.l[i].t == ASTPOSEDGE){
+				m = n.l[i].n1;
+				w.edge = WPOSEDGE;
+			}else if(n.l[i].t == ASTNEGEDGE){
+				m = n.l[i].n1;
+				w.edge = WNEGEDGE;
+			}else
+				m = n.l[i];
+			if(m.t != ASTSYM)
+				error(n.lineno, "ASTAT with non-symbol");
+			w.sig = this.sys.getsignal(this.hier, m.sym);
+			e.w.push(w);
+		}
+		break;
+	}
+	return e;
+}
+
+void
+nodedeps(Node n, Node l[], ...bool lval)
+{
+	Signal s[];
+
+	if(n === null) return;
+	switch(n.t){
+	case ASTSYM:
+		if(!lval)
+			l.push(n);
+		break;
+	case ASTNUM:
+	case ASTCINT:
+		break;
+	case ASTUN:
+		nodedeps(n.n1, l, lval);
+		break;
+	case ASTBIN:
+		nodedeps(n.n1, l, lval);
+		nodedeps(n.n2, l, lval);
+		break;
+	case ASTASS:
+		nodedeps(n.n1, l, true);
+		nodedeps(n.n2, l, false);
+		break;
+	default:
+		throw "nodedeps: unknown " + (string)n.t;
 	}
 }
 
 void
 Process.statcompile(Node n)
 {
-	int i, delay;
-	Process thisp, extrap;
+	int i, a, b;
+	Process thisp;
 	Signal s;
+	Event ev;
+	Bits v;
 
 	thisp = this;
+	if(n == null) return;
 	switch(n.t){
 	case ASTBLOCK:
 		for(i = 0; i < n.l.length; i++)
 			this.statcompile(n.l[i]);
 		break;
 	case ASTDELAY:
-                if(n.n1.t != ASTCINT)
-                        error(n.lineno, "delay not a constant");
-                delay = n.n1.numi;
-		this.code.push(void(){
-			thisp.sys.schedule(void() return thisp.run(), thisp.sys.curtime + delay);
-			thisp.state = PSLEEP;
-		});
-		break;
 	case ASTAT:
-		if(n.l.length != 1 || n.l[0].t != ASTSYM)
-			error(n.lineno, "unsupported ASTAT");
-		s = this.sys.getsignal(this.hier, n.l[0].sym);
+		ev = this.delaycompile(n, void() return thisp.run(), true);
 		this.code.push(void(){
-			s.watch.push(thisp);
 			thisp.state = PSLEEP;
+			thisp.sys.schedule(ev);
 		});
-		break;
+		break;	
 	case ASTASS:
 		if(n.n1.t != ASTSYM)
 			error(n.lineno, "invalid lval");
@@ -186,11 +361,25 @@ Process.statcompile(Node n)
 			error(n.lineno, "invalid lval");
 		s = this.sys.getsignal(this.hier, n.n1.sym);
 		this.exprcompile(n.n2);
+		ev = this.delaycompile(n.n3, void() return thisp.sys.assign(s, v), false);
 		this.code.push(void(){
-			string v;
 			v = thisp.pop();
-			thisp.sys.nonblock.push(new Event(void() return thisp.sys.assign(s, v), 0));
+			thisp.sys.schedule(ev);
 		});
+		break;
+	case ASTIF:
+		this.exprcompile(n.n1);
+		this.code.push(function() {
+			Bits v;
+			v = thisp.pop();
+			if(!v.toBool())
+				thisp.pc = a;
+		});
+		this.statcompile(n.n2);
+		this.code.push(function() { thisp.pc = b; });
+		a = this.code.length;
+		this.statcompile(n.n3);
+		b = this.code.length;
 		break;
 	default:
 		throw "Process.statcompile: unimplemented " + (string)n.t;
@@ -198,12 +387,12 @@ Process.statcompile(Node n)
 }
 
 void
-Process.push(string s)
+Process.push(Bits s)
 {
 	this.stack.push(s);
 }
 
-string
+Bits
 Process.pop()
 {
 	if(this.stack.length == 0)
@@ -215,10 +404,15 @@ void
 Process.run()
 {
 	void f();
+	int i;
 
 	if(this.state == PSLEEP)
 		this.state = PACTIVE;
-	while(this.state == PACTIVE){
+	for(i = 0; this.state == PACTIVE; i++){
+		if(i >= 100){
+			this.sys.schedule(new Event((void(Process p)() return void() return p.run())(this), true));
+			return;
+		}
 		f = this.code[this.pc++];
 		f();
 	}
@@ -230,6 +424,7 @@ System.compile(Node n, string hier)
 	int i;
 	string s;
 	Process p;
+	Node l[];
 
 	if(n == null) return;
 	switch(n.t){
@@ -252,20 +447,32 @@ System.compile(Node n, string hier)
 		p = new Process(this, hier);
 		p.statcompile(n.n1);
 		p.code.push(function() { p.state = PDEAD; });
-		this.schedule(void() return p.run(), 0);
+		this.schedule(new Event(void() return p.run(), true));
 		break;
 	case ASTALWAYS:
 		p = new Process(this, hier);
 		p.statcompile(n.n1);
 		p.code.push(function() { p.pc = 0; });
-		this.schedule(void() return p.run(), 0);
+		this.schedule(new Event(void() return p.run(), true));
+		break;
+	case ASTASSIGN:
+		l = [];
+		nodedeps(n.n2, l);
+		p = new Process(this, hier);
+		p.statcompile(new Node(Node{t: ASTASS, n1: n.n1, n2: n.n2, n3: null}));
+		if(l.length != 0){
+			p.statcompile(new Node(Node{t: ASTAT, l: l}));
+			p.code.push(function() { p.pc = 0; });
+		}else
+			p.code.push(function() { p.state = PDEAD; });
+		this.schedule(new Event(void() return p.run(), true));
 		break;
 	default:
 		throw "System.compile: unimplemented " + (string)n.t;
 	}
 }
 
-void
+string
 System.run(void)
 {
 	int i, j, t;
@@ -292,4 +499,5 @@ System.run(void)
 		}
 		this.active.shift().run();
 	}
+	return this.msg;
 }
