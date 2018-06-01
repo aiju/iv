@@ -88,7 +88,7 @@ function load()
 {
 	var t;
 
-	if(t = localStorage.getItem("text"), t != "")
+	if(t = localStorage.getItem("text"), t != undefined && t != "")
 		document.getElementById("code").value = t;
 }
 </script>
