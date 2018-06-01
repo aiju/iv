@@ -16,7 +16,7 @@ cintop(OpType op, Node a, Node b)
 	case OPMUL: z = x * y; break;
 	case OPDIV: if(y == 0) return null; z = x / y; if(z < 0) z = Math.ceil(z); else z = Math.floor(z); break;
 	case OPMOD: z = x % y; break;
-	case OPEXP: if(y < 0) return null; z = x ** y; break;
+	case OPEXP: if(y < 0) return null; z = Math.pow(x,y); break;
 	case OPAND: z = x & y; break;
 	case OPOR: z = x | y; break;
 	case OPXOR:  z = x ^ y; break;
