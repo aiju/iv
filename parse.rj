@@ -1216,6 +1216,7 @@ parse()
 		sys = new System();
 		sys.compile(m[0], m[0].sym.name);
 		document.getElementById("out").innerHTML = sys.run();
+		drawwave(sys);
 	}catch(e){
 		document.getElementById("out").innerHTML += e;
 	}

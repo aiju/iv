@@ -1,12 +1,27 @@
 struct Watch;
 struct Event;
+struct Change;
+
+struct Change {
+	int time;
+	Bits value;
+};
+
+void
+Change(int time, Bits value)
+{
+	this.time = time;
+	this.value = value;
+}
 
 struct Signal {
 	string name;
 	int width;
 	bool sign;
-	Bits val;
+	bool input;
+	Bits val, reset;
 	Watch watch[];
+	Change wave[];
 };
 
 void
@@ -15,8 +30,11 @@ Signal(string name, int width, bool sign)
 	this.name = name;
 	this.width = width;
 	this.sign = sign;
+	this.reset = new Bits("x");
 	this.val = new Bits("x");
 	this.watch = [];
+	this.wave = [];
+	this.input = false;
 }
 
 struct Watch {
@@ -72,6 +90,7 @@ Process(System sys, string hier)
 
 struct System {
 	Signal sig[string];
+	Event start[];
 	Event active[];
 	Event nonblock[];
 	Event inactive[];
@@ -84,6 +103,7 @@ void
 System(void)
 {
 	this.sig = {};
+	this.start = [];
 	this.active = [];
 	this.nonblock = [];
 	this.inactive = [];
@@ -102,12 +122,17 @@ System.addsignal(string hier, Symbol s)
 	t = new Signal(hier + "." + s.name, s.type.sz.numi, s.type.sign);
 	if(s.def !== null){
 		switch(s.def.t){
-		case ASTCINT: t.val = decconv(0, (string)s.def.numi); break;
-		case ASTNUM: t.val = s.def.num.v; break;
+		case ASTCINT: t.reset = decconv(0, (string)s.def.numi); break;
+		case ASTNUM: t.reset = s.def.num.v; break;
 		default:
 			throw "default not a constant";
 		}
 	}
+	if(s.t == SYMPORT && s.dir == "input"){
+		t.reset = new Bits("");
+		t.input = true;
+	}
+	t.wave.push(new Change(0, t.reset));
 	this.sig[t.name] = t;
 }
 
@@ -128,9 +153,12 @@ System.assign(Signal s, Bits val)
 
 	val = val.trunc(s.width, s.sign);
 	oval = s.val;
+	if(val.s == oval.s) return;
 	s.val = val;
+	if(!s.input)
+		s.wave.push(new Change(this.curtime, val));
 	this.msg += (string)this.curtime + ": " + s.name + " = " + (val.gotXZ()?val.s:(string)val.toInt()) + "\n";
-	if(oval.s != val.s && s.watch.length != 0){
+	if(s.watch.length != 0){
 		x = "0xz1".indexOf(oval.s[0]) + 1 >> 1;
 		y = "0xz1".indexOf(val.s[0]) + 1 >> 1;
 		loop: for(i = 0; i < s.watch.length; i++){
@@ -146,11 +174,13 @@ System.assign(Signal s, Bits val)
 				break;
 			}
 			for(j = 0; j < w.e.w.length; j++){
+				if(w.e.w[j] == w) continue;
 				k = w.e.w[j].sig.watch.indexOf(w);
 				w.e.w[j].sig.watch.splice(k, 1);
 			}
 			this.active.push(w.e);
 		}
+		s.watch.length = 0;
 	}
 }
 
@@ -401,6 +431,14 @@ Process.pop()
 }
 
 void
+Process.reset()
+{
+	this.state = PACTIVE;
+	this.pc = 0;
+	this.run();
+}
+
+void
 Process.run()
 {
 	void f();
@@ -447,13 +485,13 @@ System.compile(Node n, string hier)
 		p = new Process(this, hier);
 		p.statcompile(n.n1);
 		p.code.push(function() { p.state = PDEAD; });
-		this.schedule(new Event(void() return p.run(), true));
+		this.start.push(new Event(void() return p.reset(), true));
 		break;
 	case ASTALWAYS:
 		p = new Process(this, hier);
 		p.statcompile(n.n1);
 		p.code.push(function() { p.pc = 0; });
-		this.schedule(new Event(void() return p.run(), true));
+		this.start.push(new Event(void() return p.reset(), true));
 		break;
 	case ASTASSIGN:
 		l = [];
@@ -465,7 +503,7 @@ System.compile(Node n, string hier)
 			p.code.push(function() { p.pc = 0; });
 		}else
 			p.code.push(function() { p.state = PDEAD; });
-		this.schedule(new Event(void() return p.run(), true));
+		this.start.push(new Event(void() return p.reset(), true));
 		break;
 	default:
 		throw "System.compile: unimplemented " + (string)n.t;
@@ -476,8 +514,34 @@ string
 System.run(void)
 {
 	int i, j, t;
-	Event el[];
+	Event el[], e;
+	string k;
+	Signal s;
+	System sys;
 	
+	this.active.length = 0;
+	this.inactive.length = 0;
+	this.nonblock.length = 0;
+	this.future.length = 0;
+	this.curtime = 0;
+	sys = this;
+	for(k in this.sig){
+		s = this.sig[k];
+		s.val = s.reset;
+		s.watch.length = 0;
+		if(!s.input)
+			s.wave.length = 1;
+		else{
+			for(i = 1; i < s.wave.length; i++){
+				e = new Event(((var)this.assign).bind(sys, s, s.wave[i].value), true);
+				e.delay = s.wave[i].time;
+				this.schedule(e);
+			}
+		}
+	}
+	for(i = 0; i < this.start.length; i++)
+		this.schedule(this.start[i]);
+
 	for(i = 0; i < 1000; i++){
 		if(this.active.length == 0){
 			if(this.inactive.length != 0){

@@ -16,11 +16,11 @@
 	font-family: 'vgamedium', monospace;
 }
 body {
-	display: flex;
+//	display: flex;
 	background: #777777;
 }
 #code {
-	height: 50em;
+	height: 20em;
 	width: 50%;
 	font-size: 12pt;
 	background-color: #ffffe9;
@@ -88,19 +88,29 @@ function load()
 {
 	var t;
 
-	if(t = localStorage.getItem("text"), t !== undefined)
+	if(t = localStorage.getItem("text"), t != "")
 		document.getElementById("code").value = t;
 }
 </script>
 </head>
-<body onload="debugger; load(); parse()">
+<body onload="waveclear(); load(); parse()">
 <textarea height="100%" id="code" spellcheck="false" onkeydown="keydown(event)">
-module mod(input wire a, output wire b);
+module test(
+	input wire a,
+	input wire b,
+	output wire x,
+	output wire y,
+	output wire z
+);
 
-assign b = a + 1;
+	assign x = a & b;
+	assign y = a | b;
+	assign z = a ^ b;
 
 endmodule
 </textarea>
+<canvas id="wave" width="500" height="500">
+</canvas>
 <pre id="out">
 </pre>
 </body>

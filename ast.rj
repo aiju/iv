@@ -1,7 +1,7 @@
 Node
 maxi(Node a, Node b)
 {
-	return new Node(Node{t: ASTBIN, op: OPMAX, n1: a, n2: b});
+	return cfold(new Node(Node{t: ASTBIN, op: OPMAX, n1: a, n2: b}), sunsztype);
 }
 
 void
@@ -228,7 +228,7 @@ typecheck(Node n, Type ctxt)
 		}
 		switch(n.op){
 		case OPADD: case OPSUB: case OPMUL: case OPDIV: case OPMOD:
-		case OPAND: case OPOR: case OPXNOR: case OPXOR:
+		case OPAND: case OPOR: case OPXNOR: case OPXOR: case OPMAX:
 			if(t1 == TYPUNSZ || t2 == TYPUNSZ || ctxt !== null && ctxt.t == TYPUNSZ)
 				n.type = s ? sunsztype : unsztype;
 			else if(ctxt !== null && isbits(ctxt))

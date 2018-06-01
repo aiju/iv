@@ -1,0 +1,243 @@
+var canvas;
+var ctxt;
+int lines[][] = [];
+var cx, cy;
+var wavesys;
+Signal sigs[];
+
+void
+waveclear(void)
+{
+	canvas = document.getElementById("wave");
+	ctxt = canvas.getContext("2d");
+	ctxt.fillStyle = "white";
+	ctxt.fillRect(0, 0, canvas.width, canvas.height);
+	canvas.addEventListener("mousemove", wavemouse);
+	canvas.addEventListener("mousedown", wavemousedown);
+	canvas.addEventListener("mouseup", wavemouseup);
+}
+
+void
+moveTo(a, b)
+{
+	ctxt.moveTo(a, b);
+	cx = a;
+	cy = b;
+}
+
+void
+lineTo(a, b)
+{
+	ctxt.lineTo(a, b);
+	lines.push([cx,cy,a,b]);
+	cx = a;
+	cy = b;
+}
+
+void
+drawsig(Signal s, int t0, int t1, int x0, int y0, int x1, int y1)
+{
+	int i;
+	int tscale;
+	Bits v, nv;
+	int t, nt;
+	Change c;
+	int gap;
+	bool first;
+	
+	void sigstate(bool last){
+		ctxt.beginPath();
+		if(v.s[0] == "0" || v.s[0] == "x"){
+			if(first)
+				moveTo(x0+t*tscale, y1);
+			else{
+				moveTo(x0+t*tscale, (y0+y1)/2);
+				lineTo(x0+t*tscale+gap, y1);
+			}
+			if(last)
+				lineTo(x0+nt*tscale, y1);
+			else{
+				lineTo(x0+nt*tscale-gap, y1);
+				lineTo(x0+nt*tscale, (y0+y1)/2);
+			}
+		}
+		if(v.s[0] == "1")
+			moveTo(x0+nt*tscale, (y0+y1)/2);
+		if(v.s[0] == "1" || v.s[0] == "x"){
+			if(last)
+				lineTo(x0+nt*tscale-gap, y0);
+			else
+				lineTo(x0+nt*tscale-gap, y0);
+			lineTo(x0+t*tscale+gap, y0);
+			if(first)
+				lineTo(x0+t*tscale, y0);
+			else{
+				lineTo(x0+t*tscale+gap, y0);
+				lineTo(x0+t*tscale, (y0+y1)/2);
+			}
+		}
+		if(v.s[0] == "z"){
+			moveTo(x0+t*tscale, (y0+y1)/2);
+			lineTo(x0+nt*tscale, (y0+y1)/2);
+		}
+		if(v.s[0] == "x") ctxt.fill();
+		ctxt.stroke();
+		first = false;
+	}
+	
+	gap = 2;
+	first = true;
+	tscale = (x1 - x0) / (t1 - t0);
+	v = new Bits("x"); t = 0;
+	ctxt.fillStyle = "#fcc";
+	ctxt.strokeStyle = s.input ? "blue" : "black";
+	for(i = 0; i < s.wave.length; v = nv, t = nt, i++){
+		c = s.wave[i];
+		nv = c.value;
+		nt = c.time;
+		if(c.time < t0) continue;
+		if(c.time >= t1) break;
+		if(v.s == nv.s || t == nt) continue;
+		sigstate(false);
+	}
+	nv = v;
+	nt = t1;
+	sigstate(true);
+}
+
+void
+drawwave(System s)
+{
+	Signal t;
+	string i;
+	int y;
+
+	wavesys = s;
+	y = 10;
+	ctxt.fillStyle = "white";
+	ctxt.fillRect(0, 0, canvas.width, canvas.height);
+	lines = [];
+	sigs = [];
+	for(i in s.sig){
+		t = s.sig[i];
+		sigs.push(t);
+		ctxt.font = "12px sans-serif";
+		ctxt.fillStyle = "black";
+		ctxt.baseline = "middle";
+		ctxt.fillText(t.name, 10, y+20);
+		drawsig(t, 0, 100, 100, y, canvas.width, y + 40);
+		y += 50;
+	}
+}
+
+void
+bestline(int x, int y)
+{
+	int i;
+	int vx, vy, s, t;
+	int px, py;
+	int nx, ny;
+	int d, mind, minx, miny;
+	
+	mind = Infinity;
+	for(i = 0; i < lines.length; i++){
+		if(lines[i][0] == lines[i][2] && lines[i][1] == lines[i][3]) continue;
+		vx = lines[i][2] - lines[i][0];
+		vy = lines[i][3] - lines[i][1];
+		s = 1/(vx * vx + vy * vy);
+		vx *= s;
+		vy *= s;
+		t = (x - lines[i][0]) * vx + (y - lines[i][1]) * vy;
+		if(t <= 0)
+			nx = lines[i][0], ny = lines[i][1];
+		else if(t >= 1)
+			nx = lines[i][2], ny = lines[i][3];
+		else
+			nx = (1 - t) * lines[i][0] + t * lines[i][2], ny = (1 - t) * lines[i][1] + t * lines[i][3];
+		d = (x - nx) * (x - nx) + (y - ny) * (y - ny);
+		if(d < mind){
+			mind = d;
+			minx = nx;
+			miny = ny;
+		}
+	}
+	if(mind !== Infinity){
+		drawwave(wavesys);
+		ctxt.beginPath();
+		ctxt.arc(minx, miny, 3, 0, 2 * Math.PI, false);
+		ctxt.fillStyle = "black";
+		ctxt.fill();
+	}
+}
+
+var mousesig = null, mouseedge = null;
+
+void
+wavemouse(var e)
+{
+	var rect = canvas.getBoundingClientRect(),
+		scaleX = canvas.width / rect.width,
+		scaleY = canvas.height / rect.height;
+	var mx = (e.clientX - rect.left) / scaleX;
+	var my = (e.clientY - rect.top) / scaleY;
+	int t;
+
+	t = (mx - 100) / (canvas.width - 100) * 100;
+	if(mousesig !== null){
+		if((mouseedge == 0 || mousesig.wave[mouseedge - 1].time < t) && (mouseedge == mousesig.wave.length - 1 || mousesig.wave[mouseedge + 1].time > t))
+			mousesig.wave[mouseedge].time = t;
+	}
+	bestline(mx, my);
+}
+
+void
+wavemousedown(var e)
+{
+	var rect = canvas.getBoundingClientRect(),
+		scaleX = canvas.width / rect.width,
+		scaleY = canvas.height / rect.height;
+	var mx = (e.clientX - rect.left) / scaleX;
+	var my = (e.clientY - rect.top) / scaleY;
+	int t, i, mind, mini;
+	int si;
+	Signal s;
+	
+	if(mx < 100 || mx > canvas.width) return;
+	t = (mx - 100) / (canvas.width - 100) * 100;
+	si = Math.floor(my / 50);
+	if(si >= sigs.length || si < 0 || !sigs[si].input) return;
+	s = sigs[si];
+
+	mind = Infinity;
+	for(i = 0; i < s.wave.length; i++)
+		if(Math.abs(t - s.wave[i].time) < mind){
+			mind = Math.abs(t - s.wave[i].time);
+			mini = i;
+		}
+	if(mind < 3){
+		mousesig = s;
+		mouseedge = mini;
+		return;
+	}
+	for(i = 0; i < s.wave.length; i++)
+		if(s.wave[i].time >= t)
+			break;
+	s.wave.splice(i, 0, new Change(t, new Bits(s.wave[i-1].value.s == "10" ? "0" : "10")));
+	mousesig = s;
+	mouseedge = i;
+	i++;
+	for(; i < s.wave.length; i++)
+		s.wave[i].value.s = s.wave[i].value.s == "10" ? "0" : "10";
+	
+}
+
+void
+wavemouseup(var e)
+{
+	if(mousesig !== null){
+		wavesys.run();
+		drawwave(wavesys);
+	}
+	mousesig = null;
+	mouseedge = null;
+}

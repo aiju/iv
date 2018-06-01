@@ -12,6 +12,7 @@ RJ=\
 	ast.rj \
 	cfold.rj \
 	comp.rj \
+	wave.rj \
 
 all: out.js
 
