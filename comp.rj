@@ -179,8 +179,8 @@ System.assign(Signal s, Bits val)
 				w.e.w[j].sig.watch.splice(k, 1);
 			}
 			this.active.push(w.e);
+			s.watch.splice(i--, 1);
 		}
-		s.watch.length = 0;
 	}
 }
 
