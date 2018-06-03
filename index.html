@@ -12,21 +12,34 @@
     font-weight: normal;
     font-style: normal;
 }
+html, body {
+	margin: 0px;
+	padding: 0px;
+	height: 100%;
+}
 * {
 	font-family: 'vgamedium', monospace;
+	box-sizing: border-box;
 }
 body {
-//	display: flex;
+	display: flex;
+	flex-direction: row;
 	background: #777777;
 }
+#left, #right {
+	display: flex;
+	flex: 1;
+	border: 4px solid #55aaaa;
+	margin: 4px;
+}
+#code, #wave {
+	width: 100%;
+	height: 100%;
+}
 #code {
-	height: 20em;
-	width: 50%;
 	font-size: 12pt;
 	background-color: #ffffe9;
-	border: 4px solid #55aaaa;
 	outline: none;
-	
 }
 #code::-webkit-scrollbar {
 	width: 12px;
@@ -44,13 +57,12 @@ body {
 #code::selection {
 	background: rgba(238, 238, 158, 0.99);
 }
-#out {
-	border: 4px solid #55aaaa;
-	margin-left: 5px;
-	padding: 5px;
-	width: 50%;
+#error {
+	margin: 0;
+	padding: 0;
+	height: 100%;
+	width: 100%;
 	background-color: white;
-	
 }
 </style>
 <script>
@@ -94,7 +106,8 @@ function load()
 </script>
 </head>
 <body onload="waveclear(); load(); parse()">
-<textarea height="100%" id="code" spellcheck="false" onkeydown="keydown(event)">
+<div id="left">
+<textarea id="code" spellcheck="false" onkeydown="keydown(event)">
 module test(
 	input wire a,
 	input wire b,
@@ -109,9 +122,12 @@ module test(
 
 endmodule
 </textarea>
-<canvas id="wave" width="500" height="500">
+</div>
+<div id="right">
+<canvas id="wave" width="100%" height="100%">
 </canvas>
-<pre id="out">
+<pre id="error">
 </pre>
+</div>
 </body>
 </html>

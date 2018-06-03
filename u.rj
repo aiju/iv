@@ -18,3 +18,4 @@ extern var console;
 extern var Math;
 extern var JSON;
 extern int Infinity;
+extern var window;

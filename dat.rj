@@ -6,6 +6,24 @@ struct Bits;
 struct Signal;
 struct System;
 
+struct VError {
+	int lineno;
+	string s;
+};
+
+void
+VError(int lineno, string s)
+{
+	this.lineno = lineno;
+	this.s = s;
+}
+
+string
+VError.toString()
+{
+	return "line " + (string)this.lineno + ": " + this.s;
+}
+
 struct Node {
 	enum NodeType {
 		ASTMODULE,

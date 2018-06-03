@@ -1369,6 +1369,8 @@ p_primary(void)
 			if(parens) expect(')');
 			break;
 		}
+		if(t == TTYPE)
+			return node(nil, ASTSYM, lexsym);
 		error(nil, "unexpected type in expression");
 		return nil;
 	case TNEW: n = p_new(); break;
@@ -2036,6 +2038,8 @@ optype(Line *lno, int op, Type *l, Type *r)
 		return type(TYPVAR);
 	case OPCOMMA:
 		return r;
+	case OPINSTANCEOF:
+		return type(TYPBOOL);
 	default:
 		sysfatal("optype: unimplemented %d", op);
 	}
@@ -2409,6 +2413,12 @@ typecheck(Node *n, Node *func)
 			break;
 		case SYMFUNC:
 			break;
+		case SYMTYPE:
+			if(n->sym->def != nil){
+				n->type = n->sym->def->type;
+				return;
+			}
+			/* wet floor */
 		default:
 			error(n, "illegal %σ in expression", n->sym->t);
 		}

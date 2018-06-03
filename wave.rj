@@ -9,12 +9,15 @@ void
 waveclear(void)
 {
 	canvas = document.getElementById("wave");
+	canvas.width = canvas.clientWidth;
+	canvas.height = canvas.clientHeight;
 	ctxt = canvas.getContext("2d");
 	ctxt.fillStyle = "white";
 	ctxt.fillRect(0, 0, canvas.width, canvas.height);
 	canvas.addEventListener("mousemove", wavemouse);
 	canvas.addEventListener("mousedown", wavemousedown);
 	canvas.addEventListener("mouseup", wavemouseup);
+	window.addEventListener("resize", waveresize);
 }
 
 void
@@ -97,7 +100,7 @@ drawsig(Signal s, int t0, int t1, int x0, int y0, int x1, int y1)
 		nt = c.time;
 		if(c.time < t0) continue;
 		if(c.time >= t1) break;
-		if(v.s == nv.s || t == nt) continue;
+		if(t == nt) continue;
 		sigstate(false);
 	}
 	nv = v;
@@ -114,6 +117,8 @@ drawwave(System s)
 
 	wavesys = s;
 	y = 10;
+	canvas.width = canvas.clientWidth;
+	canvas.height = canvas.clientHeight;
 	ctxt.fillStyle = "white";
 	ctxt.fillRect(0, 0, canvas.width, canvas.height);
 	lines = [];
@@ -225,10 +230,6 @@ wavemousedown(var e)
 	s.wave.splice(i, 0, new Change(t, new Bits(s.wave[i-1].value.s == "10" ? "0" : "10")));
 	mousesig = s;
 	mouseedge = i;
-	i++;
-	for(; i < s.wave.length; i++)
-		s.wave[i].value.s = s.wave[i].value.s == "10" ? "0" : "10";
-	
 }
 
 void
@@ -240,4 +241,10 @@ wavemouseup(var e)
 	}
 	mousesig = null;
 	mouseedge = null;
+}
+
+void
+waveresize(var e)
+{
+	drawwave(wavesys);
 }
