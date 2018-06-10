@@ -31,6 +31,7 @@ body {
 	flex: 1;
 	border: 4px solid #55aaaa;
 	margin: 4px;
+	background-color: white;
 }
 #code, #wave {
 	width: 100%;
@@ -63,6 +64,13 @@ body {
 	height: 100%;
 	width: 100%;
 	background-color: white;
+}
+#wave { display: none; }
+.ast {
+	padding-left: 1em;
+}
+.ast li {
+	list-style-type: disc;
 }
 </style>
 <script>
@@ -124,6 +132,8 @@ endmodule
 </textarea>
 </div>
 <div id="right">
+<div id="ast">
+</div>
 <canvas id="wave" width="100%" height="100%">
 </canvas>
 <pre id="error">

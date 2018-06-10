@@ -352,122 +352,83 @@ Node.toString(...string ind, int lvl)
 }
 
 string
-Node.toDebug(... string ind)
+toASTl(Node n[])
 {
 	int i;
-	string s, sn, tab;
+	string s;
+	
+	s = "<ul class=\"ast\">";
+	for(i = 0; i < n.length; i++)
+		s += "<li>" + toAST(n[i]);
+	return s + "</ul>";
+}
 
-	tab = "  ";
-	if(ind === undefined) ind = "";
-	s = ind + (string)this.t;
-	if(this.type !== undefined)
-		s += " [" + this.type.toDebug() + "]";
-	if(this.isconst)
+string
+toAST(Node n)
+{
+	string s;
+	int i;
+	
+	if(n === null) return "null";
+	s = (string)n.t;
+	if(n.op !== undefined)
+		s += " " + (string)n.op;
+	if(n.type !== undefined)
+		s += " [" + n.type.toDebug() + "]";
+	if(n.isconst)
 		s += " const";
-	s += "\n";
-	if(this.sym != null && this.sym.st != null){
-		s += ind + tab + "SYMTAB:\n";
-		for(sn in this.sym.st.tab)
-			s += ind + tab + tab + this.sym.st.tab[sn].toDebug() + "\n";
-	}
-	switch(this.t){
-	case ASTMODULE:
-		s += ind + tab + "PARAMS: ";
-		for(i = 0; i < this.sym.params.length; i++)
-			s += (string)this.sym.params[i] + " ";
-		s += "\n" + ind + tab + "PORTS: ";
-		for(i = 0; i < this.sym.ports.length; i++)
-			s += (string)this.sym.ports[i] + " ";
-		s += "\n";
-	case ASTBLOCK:
-		for(i = 0; i < this.l.length; i++)
-			s += this.l[i].toDebug(ind + tab);
-		break;
+	s += "<br>";
+	switch(n.t){
+	case ASTMODULE: s += toASTl(n.l); break;
+	case ASTBLOCK: s += toASTl(n.l); break;
+	case ASTASSIGN: s += toASTl([n.n1, n.n2, n.n3]); break;
+	case ASTTERN: s += toASTl([n.n1, n.n2, n.n3]); break;
+	case ASTDELAY:
 	case ASTUN:
-		s += ind + tab + (string)this.op + "\n";
-		s += this.n1.toDebug(ind + tab);
+	case ASTINITIAL:
+	case ASTALWAYS:
+	case ASTPOSEDGE:
+	case ASTNEGEDGE:
+	case ASTFOREVER:
+		s += toASTl([n.n1]);
 		break;
 	case ASTBIN:
-		s += ind + tab + (string)this.op + "\n";
-		s += this.n1.toDebug(ind + tab);
-		s += this.n2.toDebug(ind + tab);
+	case ASTREPL:
+	case ASTREPEAT:
+	case ASTWHILE:
+		s += toASTl([n.n1, n.n2]);
 		break;
+	case ASTTERN:
 	case ASTASSIGN:
 	case ASTASS:
 	case ASTDASS:
-		s += this.n1.toDebug(ind + tab);
-		s += this.n2.toDebug(ind + tab);
-		if(this.n3 !== null)
-			s += this.n3.toDebug(ind + tab);
-		break;
-	case ASTNUM:
-		s += ind + tab + this.num.toString() + "\n";
-		break;
-	case ASTCINT:
-		s += ind + tab + this.numi.toString() + "\n";
-		break;
-	case ASTSYM:
-		s += ind + tab + (string)this.sym + "\n";
-		break;
-	case ASTINITIAL:
-	case ASTALWAYS:
-		s += this.n1.toDebug(ind + tab);
-		break;
 	case ASTIF:
-		s += this.n1.toDebug(ind + tab);
-		s += this.n2.toDebug(ind + tab);
-		if(this.n3 !== null){
-			s += ind + "ELSE\n";
-			s += this.n3.toDebug(ind + tab);
-		}
+	case ASTIDX:
+		s += toASTl([n.n1, n.n2, n.n3]);
 		break;
 	case ASTFOR:
-		s += this.n1.toDebug(ind + tab);
-		s += this.n2.toDebug(ind + tab);
-		s += this.n3.toDebug(ind + tab);
-		s += this.n4.toDebug(ind + tab);
+		s += toASTl([n.n1, n.n2, n.n3, n.n4]);
 		break;
-	case ASTWHILE:
-	case ASTREPEAT:
-		s += this.n1.toDebug(ind + tab);
-		s += this.n2.toDebug(ind + tab);
-		break;
-	case ASTFOREVER:
-		s += this.n1.toDebug(ind + tab);
-		break;
+	case ASTSYM: s += n.sym.toDebug(); break;
+	case ASTCINT: s += (string)n.numi; break;
+	case ASTNUM: s += (string)n.num; break;
 	case ASTCASE:
 	case ASTCASEX:
 	case ASTCASEZ:
-		s += this.n1.toDebug(ind + tab);
-		for(i = 0; i < this.l.length; i++)
-			s += this.l[i].toDebug(ind + tab);
+		s += toASTl([n.n1].concat(n.l));
 		break;
 	case ASTCASIT:
-		if(this.l === null)
-			s += ind + tab + "DEFAULT\n";
-		else
-			for(i = 0; i < this.l.length; i++)
-				s += this.l[i].toDebug(ind + tab);
-		s += ind + ":\n";
-		s += this.n1.toDebug(ind + tab);
+		s += toASTl(n.l.concat([n.n1]));
 		break;
 	case ASTMINST:
-		s += ind + tab + (string)this.sym + " " + (string)this.symn + "\n";
-		s += ind + tab + "PARAM:\n";
-		for(i = 0; i < this.pl.length; i++)
-			s += this.pl[i].toDebug(ind + tab + tab);
-		s += ind + tab + "PORTS:\n";
-		for(i = 0; i < this.l.length; i++)
-			s += this.l[i].toDebug(ind + tab + tab);
+		s += (string)n.sym + " " + (string)n.symn + "<br>";
+		s += toASTl(n.l.concat(n.pl));
 		break;
 	case ASTMINSVAL:
-		if(this.sym !== null)
-			s += ind + tab + (string)this.sym + "\n";
-		if(this.n1 !== null)
-			s += this.n1.toDebug(ind + tab);
+		s += (string)n.sym + " " + (string)n.n1;
 		break;
-	case ASTDELAY:
-		s += this.n1.toDebug(ind + tab);
+	case ASTAT:
+		s + toASTl(n.l);
 		break;
 	}
 	return s;

@@ -270,7 +270,8 @@ bool opchar[string] = {
 	">": true,
 	"^": true,
 	"|": true,
-	"~": true
+	"~": true,
+	"@": true
 };
 
 Token
@@ -562,10 +563,14 @@ Parser.p_delay()
 Node
 Parser.p_hier_identifier()
 {
+	Token t;
 	Symbol s;
 	Node n;
 	
-	s = this.expect("id").sym;
+	t = this.expect("id");
+	if(t === null)
+		return null;
+	s = t.sym;
 	if(s.t == SYMNONE)
 		error(this.lineno, "undeclared '" + s.toString() + "'");
 	n = new Node(Node{t: ASTSYM, sym: s, lineno: this.lineno});
@@ -1331,6 +1336,7 @@ parse()
 		}catch(e){
 			document.getElementById("error").innerHTML = e + "\n";
 		}
+		document.getElementById("ast").innerHTML = toASTl(m);
 		sys = new System();
 		sys.compile(m[0], m[0].sym.name);
 		sys.run();

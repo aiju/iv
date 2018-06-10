@@ -277,6 +277,19 @@ Process.exprcompile(Node n)
 		v = n.num.v;
 		this.code.push(void() return thisp.push(v));
 		break;
+	case ASTTERN:
+		this.exprcompile(n.n1);
+		this.exprcompile(n.n2);
+		this.exprcompile(n.n3);
+		this.code.push(void() {
+			var a, b, c;
+			
+			c = thisp.pop();
+			b = thisp.pop();
+			a = thisp.pop();
+			thisp.push(a.toBool() ? b : c);
+		});
+		break;
 	default:
 		throw "Process.exprcompile: unimplemented " + (string)n.t;
 	}
@@ -347,6 +360,11 @@ nodedeps(Node n, Node l[], ...bool lval)
 	case ASTASS:
 		nodedeps(n.n1, l, true);
 		nodedeps(n.n2, l, false);
+		break;
+	case ASTTERN:
+		nodedeps(n.n1, l, lval);
+		nodedeps(n.n2, l, lval);
+		nodedeps(n.n3, l, lval);
 		break;
 	default:
 		throw "nodedeps: unknown " + (string)n.t;
