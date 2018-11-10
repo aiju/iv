@@ -1852,6 +1852,16 @@ opfmt(Fmt *f)
 	return fmtprint(f, "%s", bintab[n].str);
 }
 
+int
+octalparse(char *s, uvlong *v)
+{
+	char *p;
+
+	if(*s != '0') return 0;
+	*v = strtoull(s, &p, 8);
+	return *p == 0;
+}
+
 void output(Fmt *, Node *, int, int);
 
 int
@@ -1860,6 +1870,7 @@ exprfmt(Fmt *f)
 	Node *n;
 	Oper *op;
 	int env, i, terse;
+	uvlong val;
 	
 	env = f->prec;
 	terse = (f->flags & FmtSign) != 0;
@@ -1873,7 +1884,10 @@ exprfmt(Fmt *f)
 			fmtprint(f, "%s", n->sym->name);
 		break;
 	case ASTNUM:
-		fmtprint(f, "%s", n->str);
+		if(octalparse(n->str, &val))
+			fmtprint(f, "%#ullx", val);
+		else
+			fmtprint(f, "%s", n->str);
 		break;
 	case ASTTHIS:
 		fmtprint(f, "this");
