@@ -2461,8 +2461,12 @@ typecheck(Node *n, Node *func)
 	case ASTNEW:
 		for(i = 0; i < n->nl.n; i++)
 			typecheck(n->nl.a[i], func);
-		funtype(n, n->sym->def, n->nl);
-		n->type = n->sym->type;
+		if(n->sym->def != nil){
+			funtype(n, n->sym->def, n->nl);
+			n->type = n->sym->type;
+		}else{
+			n->type = type(TYPVAR);
+		}
 		break;
 	case ASTARRAY:
 		t = nil;
