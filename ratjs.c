@@ -1016,6 +1016,21 @@ again:
 		Bungetc(bin);
 		c = '/';
 	}
+	if(isdigit(c)){
+		p = idbuf;
+		*p++ = c;
+		while(c = Bgetc(bin), isident(c) || c == '.')
+			if(p < idbuf + sizeof(idbuf) - 1)
+				*p++ = c;
+		while(c >= 0 && isspace(c)){
+			if(c == '\n') curline.lineno++;
+			c = Bgetc(bin);
+		}
+		lexnextch = c;
+		Bungetc(bin);
+		*p = 0;
+		return TNUM;
+	}
 	if(isident(c)){
 		p = idbuf;
 		*p++ = c;
@@ -2052,6 +2067,7 @@ optype(Line *lno, int op, Type *l, Type *r)
 		return type(TYPVAR);
 	case OPCOMMA:
 		return r;
+	case OPIN:
 	case OPINSTANCEOF:
 		return type(TYPBOOL);
 	default:
